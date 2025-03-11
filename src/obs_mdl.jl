@@ -5,8 +5,7 @@ sky_mdl in K and depends on dec, caz, time and freq
 """
 function model_observed_temp!(obs::Observation,
     sky_mdl::Function = (a,e,t -> 0.),
-    constellation::Union{Nothing,Constellation,AbstractVector{Constellation}} = nothing;
-    beam_avoid::Real = 0.)
+    constellation::Union{Nothing,Constellation,AbstractVector{Constellation}} = nothing)
 
     @assert !hasmethod(sky_mdl, (Real, Real, DateTime, Real))
 
@@ -95,8 +94,12 @@ function model_observed_temp!(obs::Observation,
                         con = constellation[c]
                         # satellites transmission in freq bin
                         sat_tmt = cons_temps[c](samp, f_bin)
+                        # satellite transmitter
+                        instru_sat = get_transmitter(con)
+                        # link budget model
+                        lnk_bdgt = get_lnk_bdgt_mdl(con)
                         # satellites antenna gain pattern
-                        sat_ant = cons_ant[c]
+                        # sat_ant = cons_ant[c]
 
                         # satellite(s) up at time t
                         sats_t = subset(con.sats, :times => ts -> ts .== samp; view=true)
@@ -106,6 +109,12 @@ function model_observed_temp!(obs::Observation,
                             dec_sat = pi/2 - deg2rad(sats_t[s,:elevations])
                             caz_sat = -deg2rad(sats_t[s,:azimuths])
                             rng_sat = sats_t[s,:distances]
+
+                            # link budget
+                            T_sat += lnk_bdgt(dec_tel, caz_tel, instru, 
+                                              dec_sat, caz_sat, rng_sat, instru_sat,
+                                              f_bin) * sat_tmt
+                            #=
                             # coordinate of sat in antenna frame
                             dec_sat_ant, caz_sat_ant = ground_to_beam_coord(dec_sat, caz_sat, 
                                                                             dec_tel, caz_tel)
@@ -134,6 +143,7 @@ function model_observed_temp!(obs::Observation,
                             L = ( 4*pi*rng_sat / (.3e9 / f_bin) )^2
                             # link budget
                             T_sat += gain_ant * 1/L * gain_sat * sat_tmt
+                            =#
                         end
                     end
                 end

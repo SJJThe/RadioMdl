@@ -6,6 +6,7 @@ export Antenna,
        estim_casA_flux,
        estim_temp,
        estim_virgoA_flux,
+       free_space_loss,
        get_center_freq_chans,
        get_def_angles,
        get_result,
@@ -20,6 +21,8 @@ export Antenna,
        model_observed_temp!,
        Observation,
        power_to_temperature,
+       sat_link_budget,
+       simple_link_budget,
        Trajectory,
        temperature_to_flux,
        temperature_to_power
@@ -41,11 +44,12 @@ const rad = π/180
 """ speed of light in m/s """
 const speed_c = 3e8
 
+include("astro_mdl.jl")
 include("types.jl")
 include("io.jl")
 include("antenna_pattern.jl")
-include("astro_mdl.jl")
 include("coord_frames.jl")
+include("sat_mdl.jl")
 include("obs_mdl.jl")
 
 end # module RadioMdl

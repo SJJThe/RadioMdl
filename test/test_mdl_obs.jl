@@ -44,7 +44,7 @@ T_phy = 300.0 # in K
 
 ## Receiver
 # frequency of observation
-cent_freq = 11.325e9 # in Hz
+cent_freq = 10.820e9 # in Hz
 
 # bandwidth of telescope receiver
 bw = 1e3 # in Hz
@@ -69,13 +69,13 @@ westford = Instrument(tel_ant, T_phy, cent_freq, bw, T_RX, freq_chan, coords)
 
 ## Source trajectory over observation window
 # observation window
-start_window = "2025-02-18T15:00:00.000"
-stop_window = "2025-02-18T15:45:00.000"
+start_window = "2025-03-07T14:00:00.000"
+stop_window = "2025-03-07T17:00:00.000"
 
 # source position over time
 # to get the trajectory of the source over Westford, launch the Python script
 # 'compute_obj_overflights_full_traj.py'#TODO: implement in Julia
-file_traj_obj_path = "traj_files/casA_trajectory_Westford_$(start_window)_\
+file_traj_obj_path = "supp/traj_files/casA_trajectory_Westford_$(start_window)_\
                       $(stop_window).arrow"
 traj_src = Trajectory(file_traj_obj_path;
                       time_tag = :time_stamps,
@@ -87,15 +87,15 @@ traj_src = Trajectory(file_traj_obj_path;
 ## Observation Parameters
 # start-end of observation
 dateformat = "yyyy-mm-dd\\THH:MM:SS.sss"
-start_obs = DateTime("2025-02-18T15:30:00.000", dateformat)
-stop_obs = DateTime("2025-02-18T15:40:00.000", dateformat)
+start_obs = DateTime("2025-03-07T14:36:30.000", dateformat)
+stop_obs = DateTime("2025-03-07T15:06:30.000", dateformat)
 
 # offset from source at the beginning of the observation
-offset_angles = (-40, 0.) # (az,el) in degrees
+offset_angles = (-20, 0.) # (az,el) in degrees
 
 # time of OFF-ON transition
 time_off_src = start_obs
-time_on_src = time_off_src + Minute(5)
+time_on_src = time_off_src + Minute(20)
 
 # copy trajectory
 traj_obj = Trajectory(copy(traj_src.traj))
@@ -132,7 +132,7 @@ ax.set_theta_zero_location("N")
 
 ## Source
 #source flux
-flux_src = AM.estim_casA_flux(cent_freq) # in Jy
+flux_src = estim_casA_flux(cent_freq) # in Jy
 
 # source temperature in K #FIXME: should account for antenna position
 function T_src(t::DateTime)
@@ -246,7 +246,7 @@ sat_T_phy = 0. # in K
 
 ## Satellites Transmitter
 # frequency of transmition
-sat_freq = 11.325e9 # in Hz
+sat_freq = cent_freq # in Hz
 
 # satellite transmition bandwidth
 sat_bw = 250e6 # in Hz
@@ -269,11 +269,15 @@ sat_transmit = Instrument(sat_ant, sat_T_phy, sat_freq, sat_bw, transmit_temp)
 filt_name = (:sat => s -> .!contains.(s, "[DTC]"))
 filt_el = (:elevations => e -> e .> 20)
 
+# satellite link budget estimator
+lnk_bdgt(args...) = sat_link_budget(args...; beam_avoid = 0., turn_off = false)
+
 # To get Starlink sats trajectories over Westford launch the Python script
 # 'compute_Starlink_overflights_full_traj.py'#TODO: implement in Julia
-file_traj_sats_path = "traj_files/Starlink_trajectory_Westford_$(start_window[1:end-1])_\
-                      $(stop_window[1:end-1]).arrow"
-starlink_constellation = Constellation(file_traj_sats_path, observ, sat_transmit; 
+file_traj_sats_path = "supp/traj_files/Starlink_trajectory_Westford_$(start_window)_\
+                      $(stop_window).arrow"
+starlink_constellation = Constellation(file_traj_sats_path, observ, sat_transmit,
+                                       lnk_bdgt; 
                                        name_tag = :sat,
                                        time_tag = :timestamp,
                                        elevation_tag = :elevations,
@@ -293,7 +297,6 @@ end
 ax.set_yticks(0:10:90, string.(Vector(90:-10:0)))
 ax.set_theta_zero_location("N")
 
-
 fig = plt.figure()
 ax = fig.add_subplot(1, 1, 1)
 for s in list_sats[sel_sats]
@@ -309,13 +312,12 @@ ax.set_ylabel("Elevation [deg]")
 
 
 ### TEMPERATURE MODEL DURIMG OBSERVATION ###
-model_observed_temp!(observ, sky_mdl, starlink_constellation;
-                     beam_avoid = 0.)
+model_observed_temp!(observ, sky_mdl, starlink_constellation)
 
 fig, axs = plt.subplots()
-time_samples = AM.get_time_stamps(observ)
-plot_result = temperature_to_power.(AM.get_result(observ), bw)[:,1,1]
-axs.plot(time_samples, convert_to_dB.(plot_result), label="without beam avoidance")
+time_samples = get_time_stamps(observ)
+plot_result = temperature_to_power.(get_result(observ), bw)[:,1,1]
+axs.plot(time_samples, 10 .*log10.(plot_result), label="without beam avoidance")
 axs.set_xlabel("time")
 axs.set_ylabel("Power [dBW]")
 axs.grid(true)

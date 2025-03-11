@@ -289,6 +289,18 @@ get_distances(obs::Observation) = get_distances(obs.pts)
 get_instrument(obs::Observation) = obs.inst
 get_result(obs::Observation) = obs.result
 
+function estim_temp(flux::Real,
+    obs::Observation)
+
+    instru = get_instrument(obs)
+    frequency = get_center_freq(instru)
+    ant = get_antenna(instru)
+    max_gain = get_boresight_gain(ant)
+    A_eff_max = gain_to_effective_aperture(max_gain, frequency)
+
+    return estim_temp(flux, A_eff_max)
+end
+
 
 
 """
@@ -300,11 +312,23 @@ pointing can be any direction from Nadir, defined in the map gain.
 struct Constellation{T<:AbstractFloat}
     sats::AbstractDataFrame
     tmt::Instrument{T}
+    lnk_bdgt_mdl::Function
+
+    function Constellation(sats::AbstractDataFrame,
+        tmt::Instrument{T},
+        lnk_bdgt_mdl::Function) where T
+
+        # check lnk_bdgt_mdl signature is correct
+        @assert hasmethod(lnk_bdgt_mdl, (T, T, Instrument{T}, T, T, T, Instrument{T}, T))
+
+        return new{T}(sats, tmt, lnk_bdgt_mdl)
+    end
 end
 
 function Constellation(sats::AbstractDataFrame,
     observation::Observation,
-    sat_tmt::Instrument{T};
+    sat_tmt::Instrument{T},
+    lnk_bdgt_mdl::Function = sat_link_budget;
     filt_funcs::NTuple{N,Pair} = ()) where {N,T}
 
     # observation window
@@ -317,16 +341,17 @@ function Constellation(sats::AbstractDataFrame,
         sats = subset(sats, filt; skipmissing=true, view=true)
     end
 
-    check = minimum(get_time_stamps(observation) .== unique(sats[!,:times]))
-    @assert check  "Observation time stamps and Constellation time stamps are\
-                    not aligned."
+    # check = minimum(get_time_stamps(observation) .== unique(sats[!,:times]))
+    #=@assert check=# @warn "Observation time stamps and Constellation time stamps needs\
+                             to be aligned."
 
-    return Constellation(sats, sat_tmt)
+    return Constellation(sats, sat_tmt, lnk_bdgt_mdl)
 end
 
 function Constellation(file_path::String, 
     observation::Observation,
-    sat_tmt::Instrument{T};
+    sat_tmt::Instrument{T},
+    lnk_bdgt_mdl::Function = sat_link_budget;
     name_tag::Symbol = :sat,
     time_tag::Symbol = :time_stamps,
     elevation_tag::Symbol = :altitudes,
@@ -348,12 +373,14 @@ function Constellation(file_path::String,
 
     sort!(sats, :times)
 
-    return Constellation(sats, observation, sat_tmt; filt_funcs=filt_funcs)
+    return Constellation(sats, observation, sat_tmt, lnk_bdgt_mdl; 
+                         filt_funcs=filt_funcs)
 end
 
 get_antenna(c::Constellation) = get_antenna(c.tmt)
 get_transmitter(c::Constellation) = c.tmt
 get_sats_name(c::Constellation) = unique(c.sats[!,:sat])
+get_lnk_bdgt_mdl(c::Constellation) = c.lnk_bdgt_mdl
 
 function get_sat_traj(c::Constellation,
     s::String)
