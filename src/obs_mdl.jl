@@ -5,7 +5,7 @@ sky_mdl in K and depends on dec, caz, time and freq
 """
 function model_observed_temp!(obs::Observation,
     sky_mdl::Function = (a,e,t -> 0.),
-    constellation::Union{Nothing,Constellation,AbstractVector{Constellation}} = nothing)
+    constellation::Union{Nothing,Constellation,AbstractVector{<:Constellation}} = nothing)
 
     @assert !hasmethod(sky_mdl, (Real, Real, DateTime, Real))
 

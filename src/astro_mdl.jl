@@ -50,14 +50,45 @@ end
 """
     estim_casA_flux(center_freq::T) where T
 
-estimates the flux of Cas A, given a frequency. Based on Baars et al. 1977
+estimates the flux of Cas A, given a frequency. Based on Baars et al. 2014
 
 """
-function estim_casA_flux(center_freq::T) where T
-
-    decay = 0.97 - 0.3*log10(center_freq*1e-9) # in %/year since 1980
+function estim_casA_flux(center_freq::T;
+    year::Int = 2025) where T
     
-    return 10^(5.745 - 0.770*log10(center_freq*1e-6))*(1 - decay*43/100) # in Jy
+    if 22e6 < center_freq < 300e6
+        a = 5.625
+        var_a = .021^2
+        b = -.634
+        var_b = .015^2
+        c = -.023
+        var_c = .001^2
+    elseif 300e6 < center_freq < 31e9
+        a = 5.880
+        var_a = .025^2
+        b = -0.792
+        var_b = .007^2
+        c = 0.
+        var_c = 0.
+    else
+        @error "the model is not valid for this frequency"
+    end
+    
+    # decay
+    decay = 0.97 - 0.3*log10(center_freq*1e-9) # in %/year since 1980
+    var_decay = .04^2 + .04^2*log10(center_freq*1e-9)^2
+    
+    # log flux
+    log_S_Jy = a + b*log10(center_freq*1e-6) + c*log10(center_freq*1e-6)^2
+    var_log_S_Jy = var_a + var_b*log10(center_freq*1e-6)^2 + 
+                   var_c*log10(center_freq*1e-6)^4
+
+    # flux in Jy
+    S_Jy = 10^log_S_Jy * (1 - decay*(year-1980)/100)
+    var_S_Jy = var_log_S_Jy / S_Jy^2 * (1 - decay*(year-1980)/100)^2 + 
+               10^log_S_Jy * var_decay 
+    
+    return S_Jy, var_S_Jy
 end
 
 
@@ -70,13 +101,17 @@ end
 
 
 
+
+
+
 """
 create ITU recommended gain profile
 """
 function antenna_mdl_ITU(gain_max::T,
     half_beamwidth::T,
     alphas::AbstractVector{T},
-    betas::AbstractVector{T}) where T
+    betas::AbstractVector{T};
+    single_rfi::Bool = false) where T
 
     # gain profile container
     gain_profile = zeros(length(alphas))
@@ -92,11 +127,11 @@ function antenna_mdl_ITU(gain_max::T,
 
     # calculate gain profile
     gain_profile[part1] .= gain_max .- 3*(alphas[part1]./half_beamwidth).^2
-    gain_profile[part2] .= gain_max - 20
-    gain_profile[part3] .= 29 .- 25 .*log10.(alphas[part3])
-    gain_profile[part4] .= -13
-    gain_profile[part5] .= -8
-    gain_profile[part6] .= -13
+    gain_profile[part2] .= gain_max - (single_rfi ? 17 : 20)
+    gain_profile[part3] .= (single_rfi ? 32 : 29) .- 25 .*log10.(alphas[part3])
+    gain_profile[part4] .= (single_rfi ? -10 : -13)
+    gain_profile[part5] .= (single_rfi ? -5 : -8)
+    gain_profile[part6] .= (single_rfi ? -10 : -13)
     
     # create gain dataframe
     gain_pat = DataFrame(alphas=zeros(length(alphas)*length(betas)), 
@@ -110,4 +145,3 @@ function antenna_mdl_ITU(gain_max::T,
 
     return gain_pat
 end
-

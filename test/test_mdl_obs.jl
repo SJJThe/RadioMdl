@@ -132,15 +132,15 @@ ax.set_theta_zero_location("N")
 
 ## Source
 #source flux
-flux_src = estim_casA_flux(cent_freq) # in Jy
+# flux_src = estim_casA_flux(cent_freq) # in Jy
 
 # source temperature in K #FIXME: should account for antenna position
 function T_src(t::DateTime)
-    if t <= time_on_src
+    # if t <= time_on_src
         return 0.
-    else
-        return estim_temp(flux_src, observ)
-    end
+    # else
+    #     return estim_temp(flux_src, observ)
+    # end
 end
 
 

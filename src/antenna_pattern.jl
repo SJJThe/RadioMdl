@@ -70,3 +70,11 @@ function gain_to_effective_aperture(gain::Real,
 end
 
 
+
+function estim_max_effective_aperture(aperture_efficiency::T,
+    diameter::T) where T
+
+    @assert T(0) <= aperture_efficiency <= T(1)
+    return aperture_efficiency * pi * (diameter/2)^2
+end
+
