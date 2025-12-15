@@ -62,7 +62,7 @@ function sat_link_budget(dec_tel::T,
             if turn_off
                 return zero(T)
             else
-                caz_sat_ant = mod(caz_sat_ant + pi/4, 2*pi)
+                caz_tel_sat = mod(caz_tel_sat + pi/4, 2*pi)
             end
         end
     end

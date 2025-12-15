@@ -1,5 +1,19 @@
 
 """
+"""
+function intrument_psd_stat(rec_gain::T,
+    T_antenna::Union{T,AbstractArray{T},AbstractDataFrame,YAXArray{T}},
+    T_instrument::Union{T,AbstractArray{T},AbstractDataFrame,YAXArray{T}},
+    integration_samp::Real = 1) where T
+    
+    # calculate power spectral density
+    psd = rec_gain .* (T_antenna .+ T_instrument)
+    var_psd = psd .* psd ./ integration_samp
+
+   return psd, var_psd
+end
+
+"""
 beam_avoid in degrees
 sky_mdl in K and depends on dec, caz, time and freq
 """
@@ -10,6 +24,9 @@ function model_observed_temp!(obs::Observation,
     @assert !hasmethod(sky_mdl, (Real, Real, DateTime, Real))
 
     @warn "There may be an issue in terms of absolute temperature (bandwith scaling?)"
+    #FIXME: This function is giving the temperature at a specific frequency.
+    #the result can be multiplied by the bandwidth to get the temperature
+    #observed by a instrument with a given bandwidth?
 
     # get time samples of observation
     times = get_time_stamps(obs)
@@ -68,7 +85,7 @@ function model_observed_temp!(obs::Observation,
     # get result storage shaped as times x pointing positions
     result = get_result(obs)
     # simulate for each time sample
-    for t in axes(result, 1)
+    @threads for t in axes(result, 1)
         samp = times[t]
         # pointing position
         for p in axes(result, 2)

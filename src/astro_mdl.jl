@@ -1,17 +1,8 @@
 
 """
-    estim_temp(flux::T,
-               effective_apperture::T) where T
-
-estimates the temperature of a point-like source from its flux and the antenna effective
-aperture. flux must be in Jansky
-
 """
-function estim_temp(flux::T,
-    effective_apperture::T) where T
-
-    return flux*1e-26 / (2*k_boltz) * effective_apperture
-end
+freq_to_wave(freq::T) where {T} = speed_c / freq
+wave_to_freq(wave::T) where {T} = speed_c / wave
 
 
 
@@ -21,7 +12,7 @@ power in watt, bandwidth in hertz
 function power_to_temperature(power::T,
     bandwidth::T) where T
 
-    return power / (k_boltz*bandwidth)
+    return power / (k_boltz * bandwidth)
 end
 
 
@@ -31,7 +22,23 @@ end
 function temperature_to_power(temp::T,
     bandwidth::T) where T
 
-    return k_boltz*bandwidth * temp
+    return k_boltz * bandwidth * temp
+end
+
+
+
+"""
+    flux_to_temperature(flux::T,
+                        effective_apperture::T) where T
+
+estimates the temperature of a point-like source from its flux and the antenna effective
+aperture. flux must be in Jansky
+
+"""
+function flux_to_temperature(flux::T,
+    effective_apperture::T) where T
+
+    return flux*1e-26 / (2*k_boltz) * effective_apperture
 end
 
 
@@ -43,6 +50,17 @@ function temperature_to_flux(temp::T,
     effective_apperture::T) where T
 
     return (2*k_boltz) * temp / effective_apperture * 1e26
+end
+
+
+
+"""
+"""
+function get_geometric_effective_aperture(aperture_efficiency::T,
+    diameter::T) where T
+
+    @assert T(0) <= aperture_efficiency <= T(1)
+    return aperture_efficiency * pi * (diameter/2)^2
 end
 
 
@@ -101,47 +119,50 @@ end
 
 
 
-
-
-
 """
-create ITU recommended gain profile
 """
-function antenna_mdl_ITU(gain_max::T,
-    half_beamwidth::T,
-    alphas::AbstractVector{T},
-    betas::AbstractVector{T};
-    single_rfi::Bool = false) where T
-
-    # gain profile container
-    gain_profile = zeros(length(alphas))
-
-    # select different parts of the gain profile
-    parts = [0, half_beamwidth*sqrt(17/3), 10^((49-gain_max)/25), 48, 80, 120, 180]
-    part1 = findall(i -> parts[1] <= i < parts[2], alphas)
-    part2 = findall(i -> parts[2] <= i < parts[3], alphas)
-    part3 = findall(i -> parts[3] <= i < parts[4], alphas)
-    part4 = findall(i -> parts[4] <= i < parts[5], alphas)
-    part5 = findall(i -> parts[5] <= i < parts[6], alphas)
-    part6 = findall(i -> parts[6] <= i <= parts[7], alphas)
-
-    # calculate gain profile
-    gain_profile[part1] .= gain_max .- 3*(alphas[part1]./half_beamwidth).^2
-    gain_profile[part2] .= gain_max - (single_rfi ? 17 : 20)
-    gain_profile[part3] .= (single_rfi ? 32 : 29) .- 25 .*log10.(alphas[part3])
-    gain_profile[part4] .= (single_rfi ? -10 : -13)
-    gain_profile[part5] .= (single_rfi ? -5 : -8)
-    gain_profile[part6] .= (single_rfi ? -10 : -13)
+function adc_noise_temperature(Vfs::T,#Full scale ADC voltage
+    nb_bits::Int,
+    nb_freq_bins::Int; # in FFT slice
+    instru_imp::T = impedance) where T
     
-    # create gain dataframe
-    gain_pat = DataFrame(alphas=zeros(length(alphas)*length(betas)), 
-                         betas=zeros(length(alphas)*length(betas)), 
-                         gains=zeros(length(alphas)*length(betas)))
-    for b in eachindex(betas)
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :alphas] .= alphas
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :betas] .= betas[b]
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :gains] .= 10 .^(gain_profile./10)
+    # noise power of the ADC
+    P_adc = Vfs^2 / (12*instru_imp) * 2^(-2. *nb_bits)
+
+    return power_to_temperature(P_adc, T(nb_freq_bins))
+end
+
+
+
+"""
+"""
+function friis_noise_temp(stages::Tuple{T,T}...) where T<:AbstractFloat
+    
+    # Check that at least one stage is provided
+    if isempty(stages)
+        return zero(T)
     end
 
-    return gain_pat
+    T_total = zero(T)
+    current_cumulative_gain = one(T)
+    
+    # Iterate through each stage (T_i, G_i)
+    for i in eachindex(stages)
+        T_i, G_i = stages[i]
+        
+        # The first stage adds its full noise temperature.
+        # Subsequent stages' noise temperatures are divided by the gain 
+        # of ALL preceding stages.
+        if i == 1
+            T_total += T_i
+        else
+            T_total += T_i / current_cumulative_gain
+        end
+
+        # Update the cumulative gain for the *next* stage calculation
+        current_cumulative_gain *= G_i
+    end
+
+    return T_total
 end
+
