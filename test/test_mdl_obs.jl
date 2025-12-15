@@ -12,7 +12,7 @@ using RadioMdl
 
 ## Antenna
 # radiation efficiency of telescope antenna
-eta_rad = .45
+eta_rad = .99
 
 # valid frequency band of gain pattern model
 freq_band = (10e9, 12e9) # in Hz
