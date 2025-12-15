@@ -3,31 +3,57 @@
 """
 alphas are angles from z-axis towards x-y-plane, betas are angles from x-axis
 towards y-axis, all in degree
-the gain interpolator coords are in radians
+the gain interpolator coords are in radians#FIXME: change to dgrees for
+coherence
+T_phy can be a scalar (constant physical temperature) or a DataFrame/YAXArray
+containing time stamps and physical temperatures (for time varying T_phy)
 """
 struct Antenna{T<:AbstractFloat,I<:Interpolations.GriddedInterpolation}
+    ant_diameter::T # antenna diameters in m
     gain_pat::AbstractDataFrame # gain pattern
     gain_func::I # gain interpolator
+    ap_eff::T # aperture efficiency
     rad_eff::T # radiation efficiency
+    T_phy::Union{T,AbstractDataFrame,YAXArray{T}} # physical temperature in K
     valid_freqs::Tuple{T,T} # min and max valid frequencies for the gain model
 
-    function Antenna(gain_pat::AbstractDataFrame,
+    function Antenna(ant_diameter::T, 
+        gain_pat::AbstractDataFrame,
         gain_func::I,
-        rad_eff::T,
-        valid_freqs::Tuple{T,T} = (zero(T),zero(T))) where {T<:AbstractFloat,I<:Interpolations.GriddedInterpolation}
+        ap_eff::T = .5,
+        rad_eff::T = .9,
+        T_phy::Union{T,AbstractDataFrame,YAXArray{T}} = 300.,
+        valid_freqs::Tuple{T,T} = (zero(T),T(1e12))) where {T<:AbstractFloat,
+        I<:Interpolations.GriddedInterpolation}
            
+        @assert ant_diameter > 0
         for n in propertynames(gain_pat)
             @assert n in [:alphas, :betas, :gains]
         end
+        @assert 0 <= rad_eff <= 1
+        @assert 0 <= ap_eff <= 1
+        if typeof(T_phy) <: T
+            @assert T_phy > 0
+        elseif typeof(T_phy) <: AbstractDataFrame
+            @assert :time in propertynames(T_phy) "`:time` must be a column of T_phy"
+            @assert :temp in propertynames(T_phy) "`:temp` must be a column of T_phy"
+            @assert minimum(T_phy[:temp]) > 0
+        elseif typeof(T_phy) <: YAXArray
+            @assert hasdim(T_phy, :time) "`:time` must be a dimension of T_phy"
+            @assert minimum(T_phy) > 0
+        end
         @assert valid_freqs[1] < valid_freqs[2]
         
-        return new{T,I}(gain_pat, gain_func, rad_eff, valid_freqs)
+        return new{T,I}(ant_diameter, gain_pat, gain_func, rad_eff, ap_eff, T_phy, valid_freqs)
     end
 end
 
-function Antenna(gain_ant::AbstractDataFrame,
-    rad_eff::T,
-    valid_freqs = (zero(T),zero(T))) where T
+function Antenna(ant_diameter::T, 
+    gain_ant::AbstractDataFrame,
+    ap_eff::T = .5,
+    rad_eff::T = .9,
+    T_phy::Union{T,AbstractDataFrame,YAXArray{T}} = 300.,
+    valid_freqs::Tuple{T,T} = (zero(T),zero(T))) where T
 
     # create the gain interpolator
     alphas = subset(gain_ant, :betas => b -> b .== gain_ant[1,:betas];
@@ -36,18 +62,22 @@ function Antenna(gain_ant::AbstractDataFrame,
                    view=true)[!,:betas]
     gain_func = interpolate_gain(gain_ant[!,:gains], alphas, betas)
 
-    return Antenna(gain_ant, gain_func, rad_eff, valid_freqs)
+    return Antenna(ant_diameter, gain_ant, gain_func, ap_eff, rad_eff, T_phy, valid_freqs)
 end
 
 function Antenna(file_pattern_path::String,
-    rad_eff::T,
-    valid_freqs = (zero(T),zero(T));
+    ant_diameter::T,
+    ap_eff::T = .5,
+    rad_eff::T = .9,
+    T_phy::Union{T,AbstractDataFrame,YAXArray{T}} = 300.,
+    valid_freqs::Tuple{T,T} = (zero(T),zero(T));
     power_tag::Symbol = :gains,
     declination_tag::Symbol = :alphas,
     azimuth_tag::Symbol = :betas) where T
     
     # load the antenna power pattern
-    @assert occursin(".cut", file_pattern_path) "the power pattern file must be a .cut file"
+    @assert occursin(".cut", file_pattern_path) "the power pattern file must be a .cut \
+    file"
     gain_ant = power_pattern_from_cut_file(file_pattern_path)
 
     # rename angles columns
@@ -63,102 +93,194 @@ function Antenna(file_pattern_path::String,
                                                    eta_rad=rad_eff)
     rename!(gain_ant, power_tag => :gains)
 
-    return Antenna(gain_ant, rad_eff, valid_freqs)
+    return Antenna(ant_diameter, gain_ant, ap_eff, rad_eff, T_phy, valid_freqs)
 end
 
+get_antenna_diameter(a::Antenna) = a.ant_diameter
 get_gain_pattern(a::Antenna) = a.gain_pat
 get_gain_value(a::Antenna, alpha::Real, beta::Real) = a.gain_func(alpha, beta)
+function get_directivity_value(a::Antenna, alpha::Real, beta::Real)
+    return get_gain_value(a, alpha, beta) / get_rad_eff(a)
+end
 function get_def_angles(a::Antenna)
-
     return unique(get_gain_pattern(a)[!,:alphas]), unique(get_gain_pattern(a)[!,:betas])
 end
 get_boresight_gain(a::Antenna) = maximum(get_gain_pattern(a)[:,:gains])
 function get_boresight_point(a::Antenna) 
-
     gain = get_gain_pattern(a)
     i = findmax(gain[:,:gains])[2]
-
     return gain[i,:alphas], gain[i,:betas]
 end
 function get_slice_gain(a::Antenna,
     beta::Real)
-    
     gain_pat = get_gain_pattern(a)
     g_pos = subset(gain_pat, :betas => b -> b .== beta, view=true)
     g_neg = subset(gain_pat, :betas => b -> b .== beta + 180, view=true)
-
     alphas = [-reverse(g_neg[1:end-1,:alphas]); g_pos[2:end,:alphas]]
     gains = [reverse(g_neg[1:end-1,:gains]); g_pos[2:end,:gains]]
-
     return alphas, gains
 end
+get_ap_eff(a::Antenna) = a.ap_eff
 get_rad_eff(a::Antenna) = a.rad_eff
+get_T_phy(a::Antenna) = a.T_phy
 get_valid_freqs(a::Antenna) = a.valid_freqs
+get_hpbws(a::Antenna, wavelength::Real) = estim_hpbws(a.ant_diameter, wavelength)
+function get_geometric_effective_aperture(a::Antenna)
+    return get_geometric_effective_aperture(a.ap_eff, a.ant_diameter)
+end
+#FIXME: do the real convolution
+get_antenna_temperature(a::Antenna, T_b) = get_boresight_gain(a) .* T_b ./ (4*pi)
+get_antenna_radiation_loss(a::Antenna) = (1 - get_rad_eff(a)) .* get_T_phy(a)
+
+
+
+"""
+"""
+struct Receiver{T<:AbstractFloat}
+    freq_res::T # frequency resolution
+    cent_freq::T # center frequency
+    bw::T # bandwidth
+    gain_amps::T # gain of amplifiers
+    # receiver temperature (scalar, freq vector or freq-time matrix)
+    # can includes quantum noise, LNA, etc.
+    T_rx::Union{T,AbstractDataFrame,YAXArray{T}}
+    freq_resp::Union{AbstractArray{T},AbstractDataFrame,YAXArray{T}} # frequency response
+
+    function Receiver(freq_res::T,
+        cent_freq::T,
+        bw::T,
+        gain_amps::T, 
+        T_rx::Union{T,AbstractDataFrame,YAXArray{T}},
+        freq_resp::Union{AbstractArray{T},AbstractDataFrame,YAXArray{T}}) where {T<:AbstractFloat}
+
+        @assert freq_res > 0
+        @assert cent_freq > 0
+        @assert bw > 0
+        @assert gain_amps > 0
+        if typeof(T_rx) <: T
+            @assert T_rx > 0
+        elseif typeof(T_rx) <: AbstractDataFrame
+            @assert freq_resp isa AbstractDataFrame "must work in DataFrame"
+            @assert :temp in propertynames(T_rx) "`:temp` must be a column of T_rx"
+            @assert :time in propertynames(T_rx) || :freq in propertynames(T_rx) "`:time` or `:freq` must be a column of T_rx"
+            @assert minimum(T_rx[:temp]) > 0
+            @assert :freq_resp in propertynames(freq_resp) "`:freq_resp` must be a column of freq_resp"
+            @assert :freq in propertynames(freq_resp) "`:freq` must be a column of freq_resp"
+            @assert (sum(freq_resp[:freq_resp].^2) - 1) <= 1e-10 "The receiver frequency response must be normalized"
+            if :freq in propertynames(T_rx)
+                @assert freq_resp[:freq] == T_rx[:freq] "The frequencies in freq_resp and T_rx must match"
+            end
+        elseif typeof(T_rx) <: YAXArray
+            @assert freq_resp isa YAXArray "must work in YAXArray"
+            @assert hasdim(T_rx, :time) || hasdim(T_rx, :freq) "`:time` or `:freq` must be a dimension of T_rx"
+            @assert minimum(T_rx) > 0
+            @assert hasdim(freq_resp, :freq) "`:freq` must be a dimension of freq_resp"
+            @assert (sum(freq_resp[:freq_resp].^2) - 1) <= 1e-10 "The receiver frequency response must be normalized"
+            if hasdim(T_rx, :freq)
+                @assert freq_resp[:freq] == T_rx[:freq] "The frequencies in freq_resp and T_rx must match"
+            end
+        end
+
+        return new{T}(freq_res, cent_freq, bw, gain_amps, T_rx, freq_resp)
+    end
+end
+
+function Receiver(freq_res::T,
+    cent_freq::T,
+    bw::T,
+    gain_amps::T, 
+    T_rx::Union{T,AbstractDataFrame,YAXArray{T}}) where {T<:AbstractFloat}
+
+    # flat frequency response
+    nb_freq_chan = div(bw, freq_res)
+    freq_resp = T.(ones(nb_freq_chan) ./ nb_freq_chan)
+
+    if size(T_rx,2) > 1
+        @assert size(T_rx,2) == nb_freq_chan "The second dimension of T_rx must match \
+        the number of frequency channels defined by bw and freq_res"
+    end
+
+    return Receiver(freq_res, cent_freq, bw, gain_amps, T_rx, freq_resp)
+end
+
+get_freq_res(r::Receiver) = r.freq_res
+get_center_freq(r::Receiver) = r.cent_freq
+get_bw(r::Receiver) = r.bw
+get_gain_amps(r::Receiver) = r.gain_amps
+get_T_rx(r::Receiver) = r.T_rx
+get_freq_resp(r::Receiver) = r.freq_resp
+get_nb_freq_chan(r::Receiver) = div(r.bw, r.freq_res)
+function get_center_freq_chans(r::Receiver)
+    freq_chan = get_nb_freq_chan(r)
+    bw_RX = get_bandwidth(r)
+    rng_freq = range(-bw_RX/2 + delta_freq/2, bw_RX/2 - delta_freq/2, length=freq_chan)
+    return get_center_freq(i) .+ rng_freq
+end
 
 
 
 """
 suppose the frame of antenna is oriented North-West-Up. Assumes the output of
 signal_func is expressed in Kelvin (temperature).
-signal_funcs should depend on the time and the frequency.
-freq_chan is number of frequency channels for spectrograph model instead of full
-bw integration of power.
 """
 struct Instrument{T<:AbstractFloat}
     antenna::Antenna # antenna
-    phy_temp::T # antenna physical temperature
-    cent_freq::T # center frequency
-    bw::T # bandwidth
-    signal_func::Function # signal from instrument (noise, transmission, etc.)
-    freq_chan::Int # number of frequency channels
-    coords::AbstractVector{T} # coordinates
+    receiver::Receiver{T} # receiver of precision T
+    coords::Dict{Symbol, T} # coordinates
 
-    function Instrument(ant::Antenna,
-        phy_temp::T,
-        cent_freq::T,
-        bw::T,
-        signal_func::Function,
-        freq_chan::Int = 1,
-        coords::AbstractVector{T} = T[]) where {T<:AbstractFloat}
+    function Instrument(antenna::Antenna,
+        receiver::Receiver{T},
+        coords::Dict{Symbol, T} = Dict(:lat => 0., 
+                                       :lon => 0.)) where {T<:AbstractFloat}
         
-        # check antenna model is suited for center frequency of instrument
-        ant_fmin, ant_fmax = get_valid_freqs(ant)
-        @assert ant_fmin <= cent_freq - bw/2 && cent_freq + bw/2 <= ant_fmax
-        # check signal_func signature is correct
-        @assert hasmethod(signal_func, (DateTime, T))
+        ant_fmin, ant_fmax = get_valid_freqs(antenna)
+        cent_freq = get_center_freq(receiver)
+        bw = get_bw(receiver)
+        @assert (ant_fmin <= cent_freq - bw/2) && (cent_freq + bw/2 <= ant_fmax)
 
-        return new{T}(ant, phy_temp, cent_freq, bw, signal_func, freq_chan, coords)
+        if antenna.T_phy isa AbstractDataFrame && receiver.T_rx isa AbstractDataFrame
+            if :time in propertynames(receiver.T_rx)
+                @assert receiver.T_rx[:time] == antenna.T_phy[:time] "the time stamps of T_rx and T_phy must match"
+            end
+        elseif antenna.T_phy isa YAXArray && receiver.T_rx isa YAXArray
+            if hasdim(receiver.T_rx, :time)
+                @assert receiver.T_rx[:time] == antenna.T_phy[:time] "the time stamps of T_rx and T_phy must match"
+            end
+        end
+
+        @assert :lat in keys(coords) "`:lat` must be a key of coords"
+        @assert :lon in keys(coords) "`:lon` must be a key of coords"
+
+        return new{T}(antenna, receiver, coords)
     end
 end
 
-function Instrument(ant::Antenna,
-    phy_temp::T,
-    center_freq::T,
-    bandwidth::T,
-    signal::T,
-    freq_chan::Int = 1,
-    coords::AbstractVector{T} = T[]) where {T<:AbstractFloat}
-    
-    # transform scalar in function
-    signal_func(args...) = signal
-    return Instrument(ant, phy_temp, center_freq, bandwidth, signal_func, freq_chan, coords)
-end
-
-get_coords(i::Instrument) = i.coords
 get_antenna(i::Instrument) = i.antenna
-get_phy_temp(i::Instrument) = i.phy_temp
-get_center_freq(i::Instrument) = i.cent_freq
-get_bandwidth(i::Instrument) = i.bw
-get_nb_freq_chan(i::Instrument) = i.freq_chan
-function get_center_freq_chans(i::Instrument)
+get_receiver(i::Instrument) = i.receiver
+get_coords(i::Instrument) = i.coords
+
+"""
+"""
+function instrument_psd_stat(i::Instrument{T},
+    T_b::Union{T,AbstractDataFrame,YAXArray{T}},# sky brightness temperature
+    integration_samp::Real = 1) where T
+
+    # get receiver and antenna parameters
+    rec = i.receiver
+    ant = i.antenna
+
+    # instrument gain coefficient
+    gain = rec.gain_amps * rec.freq_res * k_boltz * impedance
+
+    # antenna temperature
+    T_a = get_antenna_temperature(ant, T_b)
     
-    freq_chan = get_nb_freq_chan(i)
-    bw_RX = get_bandwidth(i)
-    delta_freq = bw_RX/freq_chan
-    rng_freq = range(-bw_RX/2 + delta_freq/2, bw_RX/2 - delta_freq/2, length=freq_chan)
-    return get_center_freq(i) .+ rng_freq
+    # instrument noise temperature
+    T_n = rec.T_rx .+ get_antenna_radiation_loss(ant)
+
+    # calculate power spectral density
+    return intrument_psd_stat(gain, T_a, T_n, integration_samp)
 end
-get_inst_signal(i::Instrument) = i.signal_func
 
 
 
@@ -189,7 +311,7 @@ struct Trajectory
         return new(traj)
     end
 end
-
+#TODO: add function to load trajectory from DataFrame with different tags
 function Trajectory(file_path::String;
     time_tag::Symbol = :times,
     elevation_tag::Symbol = :altitudes,
@@ -241,7 +363,7 @@ struct Observation{T<:AbstractFloat}
     pts::Trajectory # trajectory of the observation
     inst::Instrument{T} # instrument used for observation
     result::AbstractArray{T} # store the results of the modeling of the observation#FIXME:DataFrame?
-
+    #FIXME: merge with pts dataframe to get power AND position for maps...
     function Observation(pts::Trajectory,
         inst::Instrument{T},
         result::AbstractArray{T}) where T
@@ -296,10 +418,11 @@ function estim_temp(flux::Real,
     frequency = get_center_freq(instru)
     ant = get_antenna(instru)
     max_gain = get_boresight_gain(ant)
-    A_eff_max = gain_to_effective_aperture(max_gain, frequency)
+    A_eff_max = gain_to_effective_aperture(max_gain, freq_to_wave(frequency))
 
     return estim_temp(flux, A_eff_max)
 end
+
 
 
 
@@ -343,7 +466,7 @@ function Constellation(sats::AbstractDataFrame,
 
     # check = minimum(get_time_stamps(observation) .== unique(sats[!,:times]))
     #=@assert check=# @warn "Observation time stamps and Constellation time stamps needs\
-                             to be aligned."
+                              to be aligned."
 
     return Constellation(sats, sat_tmt, lnk_bdgt_mdl)
 end
@@ -360,7 +483,7 @@ function Constellation(file_path::String,
     filt_funcs::NTuple{N,Pair} = ()) where {N,T}
 
     # load the trajectory as a DataFrame
-    sats = DataFrame(Arrow.Table(file_path))
+    sats = DataFrame(Arrow.columntable(Arrow.Table(file_path)))
 
     # rename columns
     rename!(sats, time_tag => :times)
