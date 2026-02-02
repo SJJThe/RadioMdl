@@ -1,44 +1,32 @@
 
 """
-assumes alphas and betas are degrees. Output is converted in radians.
-"""
-function map_sphere(pattern::AbstractArray{T},
-    alphas::AbstractArray{T},
-    betas::AbstractArray{T}) where T
-    
-    # form 2D matrix for interpolation argument
-    # add first column as last column to loop azimuth coordinates
-    gain_map = hcat(reshape(pattern, length(alphas), length(betas)),
-                    pattern[1:length(alphas)])
-    
-    # generate sampling coordinates
-    a = alphas .* rad
-    b = [betas; T(360)] .* rad
+    radiated_power_to_gain(rad_pow::AbstractDataFrame,
+                           eta_rad::Real = 1.0;
+                           alpha_col::Symbol = :az,
+                           beta_col::Symbol = :polar,
+                           map_col::Symbol = :power) where T
 
-    return gain_map, a, b
-end
-
-
+Yields the gain pattern of an antenna, given a radiated power pattern.
 
 """
-yields the gain pattern of an antenna, in dB, given a radiated power pattern. It
-is assumed that the radiated power includes the radiation efficiency.
-the angles must be in degrees
 
-"""
-function radiated_power_to_gain(rad_pow::AbstractVector{T},
-    alphas::AbstractVector{T},
-    betas::AbstractVector{T};
-    eta_rad::Real = 1.0) where T
-    
+function radiated_power_to_gain(rad_pow::AbstractDataFrame,
+    eta_rad::Real = 1.0;
+    alpha_col::Symbol = :az,
+    beta_col::Symbol = :polar,
+    map_col::Symbol = :power)
+
+    @assert 0. <= eta_rad <= 1.
+
     # map the radiated power for interpolation
-    rad_pow_map, a, b = map_sphere(rad_pow, alphas, betas)
-    
+    rad_pow_map, a, b = map_sphere_coords(rad_pow; alpha_col=alpha_col, 
+                                          beta_col=beta_col, map_col=map_col)
+
     # integrate over the sphere
-    rad_pow_avg = trapz((a, b), rad_pow_map .* sin.(a)) / (4π)
+    rad_pow_avg = trapz((a, b), rad_pow_map .* sin.(b')) / (4π)
 
     # directivity
-    dir = rad_pow ./ rad_pow_avg
+    dir = rad_pow[:,map_col] ./ rad_pow_avg
 
     # gain
     return eta_rad .* dir
@@ -47,21 +35,11 @@ end
 
 
 """
-"""
-function interpolate_gain(gain::AbstractArray{T},
-    alphas::AbstractArray{T},
-    betas::AbstractArray{T}) where T
-    
-    # map the gain for interpolation
-    gain_map, a, b = map_sphere(gain, alphas, betas)
+    gain_to_effective_aperture(gain::Real,
+                               wavelength::Real)
 
-    # gain function of angles in antenna coord. system
-    return interpolate((a, b), gain_map, Gridded(Linear()))
-end
+Yields the effective aperture of an antenna given its gain and wavelength.
 
-
-
-"""
 """
 function gain_to_effective_aperture(gain::Real,
     wavelength::Real)
@@ -71,61 +49,84 @@ end
 
 
 
-function estim_max_effective_aperture(aperture_efficiency::T,
-    diameter::T) where T
+"""
+    estim_hpbws(diameter::T,
+                wavelength::T) where T
 
-    @assert T(0) <= aperture_efficiency <= T(1)
-    return aperture_efficiency * pi * (diameter/2)^2
-end
+Yields the half power beamwidth (in degrees) of an antenna given its diameter
+and wavelength.
 
-
-
+"""
 function estim_hpbws(diameter::T,
     wavelength::T) where T
 
-    return 67.6 * (wavelength / diameter) / rad # in degrees
+    return rad2deg(67.6 * (wavelength / diameter))
 end
 
 
 
 """
-create ITU recommended gain profile
+    effective_aperture_to_gain(effective_aperture::Real,
+                               wavelength::Real)
+
+Yields the gain of an antenna given its effective aperture and wavelength.
+
+"""
+function get_geometric_effective_aperture(aperture_efficiency::T,
+    diameter::T) where T
+
+    @assert T(0) <= aperture_efficiency <= T(1)
+
+    return aperture_efficiency * pi * (diameter / 2)^2
+end
+
+
+
+"""
+    antenna_mdl_ITU(gain_max::T,
+                    half_beamwidth::T,
+                    az::AbstractVector{T},
+                    polar::AbstractVector{T};
+                    single_rfi::Bool = false) where T
+
+Create ITU recommended gain profile.
+
 """
 function antenna_mdl_ITU(gain_max::T,
     half_beamwidth::T,
-    alphas::AbstractVector{T},
-    betas::AbstractVector{T};
+    az::AbstractVector{T},
+    polar::AbstractVector{T};
     single_rfi::Bool = false) where T
 
     # gain profile container
-    gain_profile = zeros(length(alphas))
+    gain_profile = zeros(length(az))
 
     # select different parts of the gain profile
     gain_max_dB = 10. *log10(gain_max)
     parts = [0, half_beamwidth*sqrt(17/3), 10^((49-gain_max_dB)/25), 48, 80, 120, 180]
-    part1 = findall(i -> parts[1] <= i < parts[2], alphas)
-    part2 = findall(i -> parts[2] <= i < parts[3], alphas)
-    part3 = findall(i -> parts[3] <= i < parts[4], alphas)
-    part4 = findall(i -> parts[4] <= i < parts[5], alphas)
-    part5 = findall(i -> parts[5] <= i < parts[6], alphas)
-    part6 = findall(i -> parts[6] <= i <= parts[7], alphas)
+    part1 = findall(i -> parts[1] <= i < parts[2], az)
+    part2 = findall(i -> parts[2] <= i < parts[3], az)
+    part3 = findall(i -> parts[3] <= i < parts[4], az)
+    part4 = findall(i -> parts[4] <= i < parts[5], az)
+    part5 = findall(i -> parts[5] <= i < parts[6], az)
+    part6 = findall(i -> parts[6] <= i <= parts[7], az)
 
     # calculate gain profile
-    gain_profile[part1] .= gain_max_dB .- 3*(alphas[part1]./half_beamwidth).^2
+    gain_profile[part1] .= gain_max_dB .- 3*(az[part1]./half_beamwidth).^2
     gain_profile[part2] .= gain_max_dB - (single_rfi ? 17 : 20)
-    gain_profile[part3] .= (single_rfi ? 32 : 29) .- 25 .*log10.(alphas[part3])
+    gain_profile[part3] .= (single_rfi ? 32 : 29) .- 25 .*log10.(az[part3])
     gain_profile[part4] .= (single_rfi ? -10 : -13)
     gain_profile[part5] .= (single_rfi ? -5 : -8)
     gain_profile[part6] .= (single_rfi ? -10 : -13)
     
     # create gain dataframe
-    gain_pat = DataFrame(alphas=zeros(length(alphas)*length(betas)), 
-                         betas=zeros(length(alphas)*length(betas)), 
-                         gains=zeros(length(alphas)*length(betas)))
-    for b in eachindex(betas)
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :alphas] .= alphas
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :betas] .= betas[b]
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :gains] .= 10 .^(gain_profile./10)
+    gain_pat = DataFrame(az=zeros(length(az)*length(polar)), 
+                         polar=zeros(length(az)*length(polar)), 
+                         gains=zeros(length(az)*length(polar)))
+    for b in eachindex(polar)
+        gain_pat[((b-1)*length(az)+1):b*length(az), :az] .= az
+        gain_pat[((b-1)*length(az)+1):b*length(az), :polar] .= polar[b]
+        gain_pat[((b-1)*length(az)+1):b*length(az), :gains] .= 10 .^(gain_profile./10)
     end
 
     return gain_pat
@@ -133,17 +134,25 @@ end
 
 
 
-function antenna_mdl_cst(gain::T,
-    alphas::AbstractVector{T},
-    betas::AbstractVector{T}) where T
+"""
+    antenna_mdl_cst(gain::T,
+                     az::AbstractVector{T},
+                     polar::AbstractVector{T}) where T
 
-    gain_pat = DataFrame(alphas=zeros(length(alphas)*length(betas)), 
-                         betas=zeros(length(alphas)*length(betas)), 
-                         gains=zeros(length(alphas)*length(betas)))
-    for b in eachindex(betas)
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :alphas] .= alphas
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :betas] .= betas[b]
-        gain_pat[((b-1)*length(alphas)+1):b*length(alphas), :gains] .= gain
+Create constant gain pattern for omni-directional antennas.
+
+"""
+function antenna_mdl_cst(gain::T,
+    az::AbstractVector{T},
+    polar::AbstractVector{T}) where T
+
+    gain_pat = DataFrame(az=zeros(length(az)*length(polar)), 
+                         polar=zeros(length(az)*length(polar)), 
+                         gains=zeros(length(az)*length(polar)))
+    for b in eachindex(polar)
+        gain_pat[((b-1)*length(az)+1):b*length(az), :az] .= az
+        gain_pat[((b-1)*length(az)+1):b*length(az), :polar] .= polar[b]
+        gain_pat[((b-1)*length(az)+1):b*length(az), :gains] .= gain
     end
 
     return gain_pat
