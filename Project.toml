@@ -5,14 +5,22 @@ version = "0.1.0"
 
 [deps]
 Arrow = "69666777-d1a9-59fb-9406-91d4454c9d45"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 DimensionalData = "0703355e-b756-11e9-17c0-8b28908087d0"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+InterpolationKernels = "16730964-a2ec-11e9-36fa-47a4f82bfac6"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+LinearInterpolators = "2fc109c4-9d77-11e9-32ff-e5c650334c16"
 Trapz = "592b5752-818d-11e9-1e9a-2b8ca4a44cd1"
 YAXArrays = "c21b50f5-aa40-41ea-b809-c0f5e47bfa5c"
 
 [compat]
+CSV = "0.10.15"
 DimensionalData = "0.29.24"
+HTTP = "1.10.19"
+InterpolationKernels = "0.1.3"
+LinearInterpolators = "0.1.8"
 YAXArrays = "0.7.0"

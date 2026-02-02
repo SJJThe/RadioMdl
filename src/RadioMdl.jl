@@ -7,11 +7,12 @@ export adc_noise_temperature,
        Constellation,
        estim_casA_flux,
        estim_hpbws,
-       estim_max_effective_aperture,
        estim_temp,
        estim_virgoA_flux,
+       fetch_satellites_info,
        flux_to_temperature,
        free_space_loss,
+       freq_range,
        freq_to_wave,
        friis_noise_temp,
        gain_to_effective_aperture,
@@ -48,20 +49,21 @@ export adc_noise_temperature,
        wave_to_freq
 
 using Arrow
+using CSV
 using DataFrames
 using Dates
 using DelimitedFiles
 using DimensionalData
+using HTTP
 using Interpolations
+using InterpolationKernels
+using LinearInterpolators
 using Trapz
-using YAXArrays
+# using YAXArrays
 using .Threads
 
 """ Boltzman's constant in J/K"""
 const k_boltz = 1.380649e-23
-
-""" degree to radian conversion factor """
-const rad = π/180
 
 """ speed of light in m/s """
 const speed_c = 299792458
@@ -69,11 +71,17 @@ const speed_c = 299792458
 """ impedance match in Ohm """
 const impedance = 50
 
+
 include("io.jl")
-include("astro_mdl.jl")
-include("antenna_pattern.jl")
 include("coord_frames.jl")
+using .CoordFrames
+include("antenna_pattern.jl")
+include("rx_mdl.jl")
+include("astro_mdl.jl")
 include("types.jl")
+
+
+
 include("sat_mdl.jl")
 include("obs_mdl.jl")
 
