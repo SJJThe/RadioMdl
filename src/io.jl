@@ -78,6 +78,33 @@ end
 
 
 
+"""
+    read_VGOS_antenna_traj(file_path::String;
+                           nb_targets_read::UnitRange{Int} = 1:Inf)
+
+Yields the trajectory of a VGOS antenna.
+
+"""
+function read_VGOS_antenna_traj(file_path::String;
+    kwds...)
+    
+    @assert occursin(".dat", file_path) "the trajectory file must be a .dat file"
+
+    antenna_pos = CSV.read(file_path, DataFrame; delim=" ", ignorerepeated=true, 
+                           header=false, kwds...)
+    rename!(antenna_pos, names(antenna_pos)[end-1:end] .=> ["azimuths", "elevations"])
+    antenna_pos[:,:times] .= DateTime.(antenna_pos.Column1) .+ 
+                            Day.(antenna_pos.Column2 .- 1) .+ 
+                            Hour.(antenna_pos.Column3) .+ Minute.(antenna_pos.Column4) .+
+                            Second.(antenna_pos.Column5)
+    select!(antenna_pos, [:times, :azimuths, :elevations])
+    sort!(antenna_pos, :times)
+    
+    return antenna_pos
+end
+
+
+
 """ Celestrak active satellites url """
 const celestrak_url = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=csv"
 
