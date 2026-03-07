@@ -114,6 +114,16 @@ end
 
 
 """
+    galactic_model(freq::Real)
+
+Yields the galactic model at frequency 'freq'.
+
+"""
+galactic_model(freq::Real) = 1e-1 * (freq / 1.41e9)^(-2.7)
+
+
+
+"""
     ground_model(alpha_grid::AbstractVector{T},
                  beta_grid::AbstractVector{T},
                  T_ground::AbstractMatrix{T}) where T
@@ -161,8 +171,8 @@ end
 
 function ground_model(T_ground::T) where T
 
-    alpha_grid = collect(0:1.:360)
-    beta_grid = collect(0:1.:180)
+    alpha_grid = [0., 180., 360.]
+    beta_grid = [0., 90.,180.]
 
     return ground_model(alpha_grid, beta_grid, T_ground)
 end
@@ -175,7 +185,7 @@ end
                          zenith_angle::T) where T
 
 Yields the 'temp' temperature altered by the atmosphere opacity at
-'zenith_angle'.
+'zenith_angle' (in degrees).
 
 ---
     atmos_opacity_impact(temp::AbstractArray{T},
@@ -202,7 +212,7 @@ function atmos_opacity_impact(temp::T,
     @assert 0 <= zenith_angle < 90 "zenith angle must be at or over 0 and below 90 \
             degrees"
 
-    return temp .* exp(- zenith_opacity / cos(deg2rad(zenith_angle)))
+    return temp .* exp(- zenith_opacity / cosd(zenith_angle))
 end
 
 function atmos_opacity_impact(temp::AbstractArray{T},
