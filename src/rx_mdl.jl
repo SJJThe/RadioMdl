@@ -2,19 +2,29 @@
 """
     freq_range(freq_res::T,
                freq_center::T,
-               nb_freq_bins::Int,
                bandwidth::T) where T
 
 Yields the frequency range centered on freq_center and of length nb_freq_bins.
+The range is created such as the grid frequencies are always integer multiples
+of the frequnecy resolution 'freq_res'.
 
 """
 function freq_range(freq_res::T,
     freq_center::T,
-    nb_freq_bins::Int,
     bandwidth::T) where T
 
-    rng = range(-bandwidth/2 + freq_res/2, bandwidth/2 - freq_res/2, length=nb_freq_bins)
-    return freq_center .+ rng
+    # rng = range(freq_res/2, bandwidth/2 - freq_res, length=nb_freq_bins)
+    # return freq_center .+ rng
+    # return range(freq_center - bandwidth/2 + freq_res, freq_center + bandwidth/2;
+    #              length=nb_freq_bins)
+    # return range(freq_center - bandwidth/2, freq_center + bandwidth/2;
+            #  length=nb_freq_bins)
+    nb_freq_bins = div(bandwidth, freq_res)
+    f_c = round(Int, freq_center / freq_res)
+    fmin = f_c - div(nb_freq_bins-1, 2)
+    fmax = fmin + nb_freq_bins - 1
+    
+    return freq_res .* (fmin:fmax)
 end
 
 
@@ -110,3 +120,68 @@ function friis_noise_temp(stages::Tuple{T,T}...) where T<:AbstractFloat
     return T_total
 end
 
+
+
+"""
+    intrument_psd_stat(psd_inst_gain::T,
+                       T_antenna::T,
+                       T_instrument::T,
+                       integration_samp::Real = 1) where T
+
+Yields the power spectral density and its variance of an instrument given
+the instrument gain 'psd_inst_gain', antenna temperature 'T_antenna',
+instrument temperature 'T_instrument' and number of integration samples
+'integration_samp'.
+
+---
+    instrument_psd_stat(psd_inst_gain::T,
+                        T_antenna::AbstractArray{T},
+                        T_instrument::AbstractArray{T},
+                        integration_samp::Real = 1) where T
+
+Uses 'instrument_psd_stat' on arrays.
+
+"""
+function instrument_psd_stat(psd_inst_gain::G,
+    T_antenna::T,
+    T_instrument::I,
+    integration_samp::Real = 1) where {G,T,I}
+    
+    # calculate power spectral density
+    psd = psd_inst_gain .* (T_antenna .+ T_instrument)
+    var_psd = psd .* psd ./ integration_samp
+
+   return psd, var_psd
+end
+
+# function instrument_psd_stat(psd_inst_gain::AbstractArray{T},
+#     T_antenna::AbstractArray{T},
+#     T_instrument::AbstractArray{T},
+#     integration_samp::Real = 1) where T
+    
+#     return instrument_psd_stat.(psd_inst_gain, T_antenna, T_instrument, integration_samp)
+# end
+
+# function instrument_psd_stat(psd_inst_gain::T,
+#     T_antenna::AbstractArray{T},
+#     T_instrument::AbstractArray{T},
+#     integration_samp::Real = 1) where T
+    
+#     return instrument_psd_stat.(psd_inst_gain, T_antenna, T_instrument, integration_samp)
+# end
+
+# function instrument_psd_stat(psd_inst_gain::AbstractArray{T},
+#     T_antenna::T,
+#     T_instrument::AbstractArray{T},
+#     integration_samp::Real = 1) where T
+    
+#     return instrument_psd_stat.(psd_inst_gain, T_antenna, T_instrument, integration_samp)
+# end
+
+# function instrument_psd_stat(psd_inst_gain::AbstractArray{T},
+#     T_antenna::AbstractArray{T},
+#     T_instrument::T,
+#     integration_samp::Real = 1) where T
+    
+#     return instrument_psd_stat.(psd_inst_gain, T_antenna, T_instrument, integration_samp)
+# end
