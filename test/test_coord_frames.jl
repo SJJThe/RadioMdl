@@ -210,9 +210,9 @@ println("Applying rotation: Γ=45 °, Ψ=30 °")
 
 pattern_transformed = pass_frame_to_frame(pattern_const, 45.0, 30.0)
 
-println("Min value after transform: $(minimum(pattern_transformed.spheremap))")
-println("Max value after transform: $(maximum(pattern_transformed.spheremap))")
-@test all(isapprox.(pattern_transformed.spheremap, 1.0, atol=1e-6))
+println("Min value after transform: $(minimum(pattern_transformed))")
+println("Max value after transform: $(maximum(pattern_transformed))")
+@test all(isapprox.(pattern_transformed, 1.0, atol=1e-6))
 println("✓ Constant pattern remains constant after rotation")
 
 
@@ -227,7 +227,7 @@ println("Dipole pattern should remain unchanged (azimuthally symmetric)")
 
 pattern_rotZ = pass_frame_to_frame(pattern_dipole, 90.0, 0.0)
 
-pat_diff = maximum(abs.(pattern_rotZ.spheremap - pattern_dipole.spheremap))
+pat_diff = maximum(abs.(pattern_rotZ - pattern_dipole.spheremap))
 println("Maximum difference: $pat_diff")
 @test pat_diff < 0.1  # Allow some interpolation error
 println("✓ Azimuthally symmetric pattern unchanged by Z-rotation")
@@ -242,7 +242,7 @@ pattern_dir = create_test_pattern(alphas, betas, :directional)
 println("Applying no rotation to directional pattern")
 pattern_identity = pass_frame_to_frame(pattern_dir, 0.0, 0.0)
 
-pat_diff = maximum(abs.(pattern_identity.spheremap - pattern_dir.spheremap))
+pat_diff = maximum(abs.(pattern_identity - pattern_dir.spheremap))
 println("Maximum difference: $pat_diff")
 @test pat_diff < 0.01
 println("✓ Identity transformation preserves pattern")
@@ -264,10 +264,10 @@ println("Original peak value: $(pattern_beam.spheremap[idx])")
 println("\nRotating 90° around Z-axis (Γ=90 °, Ψ=0 °)")
 pattern_rot90 = pass_frame_to_frame(pattern_beam, 90.0, 0.0)
 
-idx_new = argmax(pattern_rot90.spheremap)
+idx_new = argmax(pattern_rot90)
 i_new, j_new = Tuple(idx_new)
 println("New peak at approximately: α=$(alphas[i_new]) °, β=$(betas[j_new]) °")
-println("New peak value: $(pattern_rot90.spheremap[idx_new])")
+println("New peak value: $(pattern_rot90[idx_new])")
 
 # Peak should move in azimuth by ~90°
 expected_alpha = mod(0.0 - 90.0, 360.0)
@@ -287,7 +287,7 @@ println("Original energy: $energy_original")
 
 pattern_rot = pass_frame_to_frame(pattern_test, 37.0, 25.0)
 
-energy_rotated = sum(pattern_rot.spheremap.^2)
+energy_rotated = sum(pattern_rot.^2)
 println("Rotated energy: $energy_rotated")
 
 relative_diff = abs(energy_rotated - energy_original) / energy_original
@@ -309,7 +309,7 @@ pattern_rot = pass_frame_to_frame(pattern_test, Gamma, Psi)
 println("Applying inverse rotation: Γ=$(-Gamma) °, Ψ=$(-Psi) °")
 pattern_back = pass_frame_to_frame(pattern_rot, -Gamma, -Psi)
 
-pat_diff = sqrt(sum((pattern_back.spheremap - pattern_test.spheremap).^2) / 
+pat_diff = sqrt(sum((pattern_back - pattern_test.spheremap).^2) / 
            length(pattern_test.spheremap))
 println("RMS difference from original: $pat_diff")
 @test pat_diff < 0.15  # Allow for interpolation errors
@@ -330,9 +330,9 @@ println("New grid: $(length(alphas_new))×$(length(betas_new))")
 
 pattern_resampled = pass_frame_to_frame(pattern_orig, 60.0, 45.0, alphas_new, betas_new)
 
-println("Output size: $(size(pattern_resampled.spheremap))")
-@test size(pattern_resampled.spheremap) == (length(alphas_new), length(betas_new))
-@test all(isfinite.(pattern_resampled.spheremap))
+println("Output size: $(size(pattern_resampled))")
+@test size(pattern_resampled) == (length(alphas_new), length(betas_new))
+@test all(isfinite.(pattern_resampled))
 println("✓ Resampled pattern has correct dimensions and finite values")
 
 
@@ -354,11 +354,11 @@ println("\nTilting frame by 90° (Γ=0°, Ψ=90°)")
 println("β=0° in new frame should show what was at β=90° in old frame")
 pattern_tilted = pass_frame_to_frame(pattern_elev, 0.0, 90.0)
 
-println("New value at β=0°: $(pattern_tilted.spheremap[1, 1])")
+println("New value at β=0°: $(pattern_tilted[1, 1])")
 println("Expected: ≈1 (from sin(90°)=1)")
 
 # Check that β=0° in new frame has high value (from old β=90°)
-@test pattern_tilted.spheremap[1, 1] > 0.8  # Should be close to sin(90°) = 1
+@test pattern_tilted[1, 1] > 0.8  # Should be close to sin(90°) = 1
 println("✓ Tilted pattern shows expected redistribution")
 
 println("\n" * "="^60)
@@ -398,7 +398,7 @@ beta_grid_new = 0:1.:180
 other_smap = pass_frame_to_frame(smap, 135., 45., alpha_grid_new, beta_grid_new)
 
 fig, axs = plt.subplots(subplot_kw=Dict("projection"=>"polar"))
-contourf(deg2rad.(alpha_grid_new), beta_grid_new, 10. .*log10.(other_smap.spheremap');
+contourf(deg2rad.(alpha_grid_new), beta_grid_new, 10. .*log10.(other_smap');
          cmap="viridis")
 colorbar(label="Power (dBW)")
 =#
