@@ -1,6 +1,6 @@
 module RadioMdl
 
-export AbstractBkgModel,
+export AbstractBkg,
        Antenna,
        adc_noise_temperature,
        add_coords,
@@ -144,6 +144,8 @@ include("antenna_pattern.jl")
 include("rx_mdl.jl")
 include("astro_mdl.jl")
 include("types.jl")
+# include("satellite_position.jl")
+# using .SatPos
 include("sat_mdl.jl")
 include("obs_mdl.jl")
 
