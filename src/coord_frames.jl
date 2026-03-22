@@ -20,7 +20,7 @@ with 'p' the point of spherical coordinates (α,β) in degrees, or alternatively
 of cartesian coordinates (x,y,z).
 
 """
-module CoordFrames
+module CoordFrames#FIXME: rename file to same name as module
 
 using DataFrames
 using Interpolations
@@ -147,7 +147,7 @@ using the ['interpolate_sphere_map'](@ref) function.
 Yields a 'SphereMap' struct created from a DataFrame 'spheremap' containing the
 columns of angles and map values. The columns can be specified using the
 keywords 'alpha_col', 'beta_col' and 'map_col' (default values are
-':az', ':polar' and ':power' respectively)( see ['map_sphere_coords'](@ref] ).
+':caz', ':polar' and ':power' respectively)( see ['map_sphere_coords'](@ref] ).
 The angles must be in degrees.
 
 """
@@ -164,9 +164,16 @@ struct SphereMap{T,V<:AbstractVector{T},M<:AbstractMatrix{T},
         interp_map::I) where {T,V<:AbstractVector{T},M<:AbstractMatrix{T},
                               I<:Interpolations.GriddedInterpolation}
         
+        if length(alpha_grid) == 1 && alpha_grid[1] == 0
+            # @warn "alpha_grid contains only origin, expand to two values assuming \
+            #        uniform map"        
+            alpha_grid = [alpha_grid[1], mod(alpha_grid[1]+180., 360.)]
+            spheremap = repeat(reshape(spheremap, 1, :), length(alpha_grid), 1)
+            interp_map = interpolate_sphere_map(spheremap, alpha_grid, beta_grid)
+        end
+        @assert length(alpha_grid) > 1
         @assert all(0 .<= alpha_grid .<= 360.)
         @assert all(0 .<= beta_grid .<= 180.)
-        @assert length(alpha_grid) > 1
         @assert length(beta_grid) > 1
         @assert length(alpha_grid) == size(spheremap, 1) == size(interp_map, 1) - 1
         @assert length(beta_grid) == size(spheremap, 2) == size(interp_map, 2)
@@ -258,7 +265,7 @@ end
 Base.show(io::IO, SM::SphereMap{T}) where {T} = begin 
     print(io, "SphereMap{$T}:\n")
     print(io, "sample grid size: $(size(SM.spheremap))\n")
-    print(io, "angles resolutions (degrees): $(get_angle_resolution(SM))")
+    print(io, "angles resolutions (degrees): $(get_angle_resolution(SM))\n")
 end
 
 (SM::SphereMap)(alpha::Real, beta::Real) = SM.interp_map(alpha, beta)
@@ -320,10 +327,12 @@ function pass_frame_to_frame(SM::SphereMap{T},
     Psi::Real,#FIXME:change name varaibles
     new_alpha_grid::AbstractVector{T} = SM.alpha_grid, 
     new_beta_grid::AbstractVector{T} = SM.beta_grid;
+    grid_only::Bool = false,
     kwds...) where T
     
     itp = SM.interp_map
-    new_map = Matrix{T}(undef, length(new_alpha_grid), length(new_beta_grid))
+    map_type = grid_only ? Tuple{Float64, Float64} : T
+    new_map = Matrix{map_type}(undef, length(new_alpha_grid), length(new_beta_grid))
     @inbounds for b in eachindex(new_beta_grid)#TODO: maybe manually vectorized
         @simd for a in eachindex(new_alpha_grid)
             # For each point in NEW frame, find where it came from in OLD frame
@@ -332,8 +341,13 @@ function pass_frame_to_frame(SM::SphereMap{T},
                                                         inverse = true,
                                                         kwds...)
 
-            # sample original pattern
-            new_map[a,b] = itp(alpha_orig, beta_orig)
+            if grid_only
+                # return original angles
+                new_map[a,b] = (alpha_orig, beta_orig)
+            else
+                # sample original pattern
+                new_map[a,b] = itp(alpha_orig, beta_orig)
+            end
         end
     end
 
@@ -363,7 +377,7 @@ end
 
 """
     map_sphere_coords(spheremap::AbstractDataFrame;
-                      alpha_col::Symbol = :az,
+                      alpha_col::Symbol = :caz,
                       beta_col::Symbol = :polar,
                       map_col::Symbol = :gains)
 
@@ -372,7 +386,7 @@ columns corresponding to the angles in 'alpha_col' and 'beta_col', respectively.
 
 """
 function map_sphere_coords(spheremap::AbstractDataFrame;
-    alpha_col::Symbol = :az,
+    alpha_col::Symbol = :caz,
     beta_col::Symbol = :polar,
     map_col::Symbol = :gains)
     
@@ -384,7 +398,7 @@ function map_sphere_coords(spheremap::AbstractDataFrame;
     map_vec = spheremap[!, map_col]
     map_values = zeros(eltype(map_vec), length(alpha_grid), length(beta_grid))
     for (i, a) in enumerate(alpha_grid)
-        beta_col_a = subset(spheremap, alpha_col => az -> az .== a; view=true)[!,map_col]
+        beta_col_a = subset(spheremap, alpha_col => caz -> caz .== a; view=true)[!,map_col]
         map_values[i,:] .= beta_col_a
     end
 
@@ -413,6 +427,11 @@ function interpolate_sphere_map(spheremap::AbstractMatrix{T},
     end
 
     return interpolate((alphas, betas), spheremap, (Gridded(Linear()),Gridded(Linear())))
+    ############################TODO: constrain to regular grids
+    # alphas = range(alphas[1], alphas[end], length = length(alphas))
+    # betas = range(betas[1], betas[end], length = length(betas))
+    # itp = interpolate(spheremap, BSpline(Linear()))
+    # return scale(itp, alphas, betas)
 end
 
 
