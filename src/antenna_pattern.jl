@@ -41,7 +41,8 @@ end
 """
     radiated_power_to_gain!(rad_pow::AbstractDataFrame,
                            eta_rad::Real = 1.0;
-                           alpha_col::Symbol = :az,
+
+# using DimensionalData                           alpha_col::Symbol = :caz,
                            beta_col::Symbol = :polar,
                            map_col::Symbol = :power) where T
 
@@ -50,7 +51,7 @@ Yields the gain pattern of an antenna, given a radiated power pattern.
 """
 function radiated_power_to_gain!(rad_pow::AbstractDataFrame,
     eta_rad::Real = 1.0;
-    alpha_col::Symbol = :az,
+    alpha_col::Symbol = :caz,
     beta_col::Symbol = :polar,
     map_col::Symbol = :power)
 
@@ -126,7 +127,7 @@ end
 """
     antenna_mdl_ITU_SA_509_3(gain_max::T,
                              half_beamwidth::T,
-                             az::AbstractVector{T},
+                             caz::AbstractVector{T},
                              pol::AbstractVector{T};
                              single_rfi::Bool = false) where T
 
@@ -138,7 +139,7 @@ less than 30 GHz".
 """
 function antenna_mdl_ITU_SA_509_3(gain_max::T,
     half_beamwidth::T,
-    az::AbstractVector{T},
+    caz::AbstractVector{T},
     pol::AbstractVector{T};
     single_rfi::Bool = false) where T
 
@@ -164,12 +165,12 @@ function antenna_mdl_ITU_SA_509_3(gain_max::T,
     gain_profile[part6] .= (single_rfi ? -10 : -13)
     
     # create gain dataframe
-    gain_pat = DataFrame(polar=zeros(length(pol)*length(az)), 
-                         az=zeros(length(pol)*length(az)), 
-                         gains=zeros(length(pol)*length(az)))
-    for b in eachindex(az)
+    gain_pat = DataFrame(polar=zeros(length(pol)*length(caz)), 
+                         caz=zeros(length(pol)*length(caz)), 
+                         gains=zeros(length(pol)*length(caz)))
+    for b in eachindex(caz)
         gain_pat[((b-1)*length(pol)+1):b*length(pol), :polar] .= pol
-        gain_pat[((b-1)*length(pol)+1):b*length(pol), :az] .= az[b]
+        gain_pat[((b-1)*length(pol)+1):b*length(pol), :caz] .= caz[b]
         gain_pat[((b-1)*length(pol)+1):b*length(pol), :gains] .= 10 .^(gain_profile./10)
     end
 
@@ -181,7 +182,7 @@ end
 """
     antenna_mdl_ITU_RA_1631(ant_diameter::T,
                             wavelength::T,
-                            az::AbstractVector{T},
+                            caz::AbstractVector{T},
                             pol::AbstractVector{T}) where T
 
 Create ITU recommended gain profile according to ITU-R RA.1631-1 "Reference
@@ -192,7 +193,7 @@ non-GSO systems and radio astronomy service stations based on the epfd concept".
 function antenna_mdl_ITU_RA_1631(gain_max::T,
     ant_diameter::T,
     wavelength::T,
-    az::AbstractVector{T},
+    caz::AbstractVector{T},
     pol::AbstractVector{T}) where {T}
     
     # gain profile container
@@ -222,12 +223,12 @@ function antenna_mdl_ITU_RA_1631(gain_max::T,
     gain_profile[part7] .= 10. .^(-12. / 10.)
 
     # create gain dataframe
-    gain_pat = DataFrame(polar=zeros(length(pol)*length(az)), 
-                         az=zeros(length(pol)*length(az)), 
-                         gains=zeros(length(pol)*length(az)))
-    for b in eachindex(az)
+    gain_pat = DataFrame(polar=zeros(length(pol)*length(caz)), 
+                         caz=zeros(length(pol)*length(caz)), 
+                         gains=zeros(length(pol)*length(caz)))
+    for b in eachindex(caz)
         gain_pat[((b-1)*length(pol)+1):b*length(pol), :polar] .= pol
-        gain_pat[((b-1)*length(pol)+1):b*length(pol), :az] .= az[b]
+        gain_pat[((b-1)*length(pol)+1):b*length(pol), :caz] .= caz[b]
         gain_pat[((b-1)*length(pol)+1):b*length(pol), :gains] .= gain_profile
     end
     
@@ -238,23 +239,23 @@ end
 
 """
     antenna_mdl_cst(gain::T,
-                     az::AbstractVector{T},
+                     caz::AbstractVector{T},
                      pol::AbstractVector{T}) where T
 
 Create constant gain pattern for omni-directional antennas.
 
 """
 function antenna_mdl_cst(gain::T,
-    az::AbstractVector{T},
+    caz::AbstractVector{T},
     pol::AbstractVector{T}) where T
 
-    gain_pat = DataFrame(az=zeros(length(az)*length(pol)), 
-                         polar=zeros(length(az)*length(pol)), 
-                         gains=zeros(length(az)*length(pol)))
+    gain_pat = DataFrame(caz=zeros(length(caz)*length(pol)), 
+                         polar=zeros(length(caz)*length(pol)), 
+                         gains=zeros(length(caz)*length(pol)))
     for b in eachindex(pol)
-        gain_pat[((b-1)*length(az)+1):b*length(az), :az] .= az
-        gain_pat[((b-1)*length(az)+1):b*length(az), :polar] .= pol[b]
-        gain_pat[((b-1)*length(az)+1):b*length(az), :gains] .= gain
+        gain_pat[((b-1)*length(caz)+1):b*length(caz), :caz] .= caz
+        gain_pat[((b-1)*length(caz)+1):b*length(caz), :polar] .= pol[b]
+        gain_pat[((b-1)*length(caz)+1):b*length(caz), :gains] .= gain
     end
 
     return gain_pat
