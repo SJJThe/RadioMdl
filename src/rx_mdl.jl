@@ -67,7 +67,9 @@ end
 
 Yields the noise temperature of the ADC for a given full-scale voltage 'Vfs',
 number of bits 'nb_bits' and number of frequency bins 'nb_freq_bins'. The 
-instrument impedance 'instru_imp' is set to 50 Ohm by default.
+instrument impedance 'instru_imp' is set to 50 Ohm by default. Note that the
+result is the total noise temperature in each nb_freq_bins, and not the frequency
+dependent noise temperature.
 
 """
 function adc_noise_temperature(Vfs::T,#Full scale ADC voltage
@@ -107,11 +109,7 @@ function friis_noise_temp(stages::Tuple{T,T}...) where T<:AbstractFloat
         # The first stage adds its full noise temperature.
         # Subsequent stages' noise temperatures are divided by the gain 
         # of ALL preceding stages.
-        if i == 1
-            T_total += T_i
-        else
-            T_total += T_i / current_cumulative_gain
-        end
+        T_total += T_i / current_cumulative_gain
 
         # Update the cumulative gain for the *next* stage calculation
         current_cumulative_gain *= G_i
