@@ -21,7 +21,7 @@ function power_pattern_from_cut_file(file_path::String;
 
     # parse file
     Es = readdlm(file_path)
-    pattern = DataFrame(polar=Float64[], az=Float64[], power=Float64[])
+    pattern = DataFrame(polar=Float64[], caz=Float64[], power=Float64[])
     k = 1
     dec_step = 0.
     while k <= size(Es,1)
@@ -49,29 +49,29 @@ function power_pattern_from_cut_file(file_path::String;
     
     @warn "This function assumes TICRA generated files"
 
-    # check that polar ∈ [-180,180] and az ∈ [0, 180[
+    # check that polar ∈ [-180,180] and caz ∈ [0, 180[
     subset!(pattern, :polar => p -> -180. .<= p .<= 180., 
-            :az => a -> 0. .<= a .< 180.)
+            :caz => a -> 0. .<= a .< 180.)
 
-    # at this point, when the telescope is pointed at the horizon, az = 0 gives
+    # at this point, when the telescope is pointed at the horizon, caz = 0 gives
     # an horizontal slice, with polar > 0 oriented towards co-azimuth angles..
 
-    # change interval so that az ∈ [0,360[ and polar ∈ [0,180]
-    pattern[pattern.polar .<= 0.,:az] .+= 180.
+    # change interval so that caz ∈ [0,360[ and polar ∈ [0,180]
+    pattern[pattern.polar .<= 0.,:caz] .+= 180.
     pattern[pattern.polar .< 0.,:polar] .*= -1.
-    append!(pattern, [(;polar = zero(eltype(pattern.polar)), az = i, 
+    append!(pattern, [(;polar = zero(eltype(pattern.polar)), caz = i, 
                        power = pattern[pattern.polar .== 0.,:power][1])
                       for i in pattern[pattern.polar .== maximum(pattern.polar) .&& 
-                                       pattern.az .< 180.,:az]])
+                                       pattern.caz .< 180.,:caz]])
     
-    # move the origin of az so that, when telescope points at the horizon, the
-    # first slice (for the new az = 0) is vertical with polar > 0 oriented towards
+    # move the origin of caz so that, when telescope points at the horizon, the
+    # first slice (for the new caz = 0) is vertical with polar > 0 oriented towards
     # the ground.
-    pattern[:,:az] = mod.(pattern[!,:az] .- 90., 360.)
+    pattern[:,:caz] = mod.(pattern[!,:caz] .- 90., 360.)
     
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     
-    sort!(pattern, [:az, :polar])
+    sort!(pattern, [:caz, :polar])
     
     return pattern
 end
