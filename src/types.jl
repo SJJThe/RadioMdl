@@ -608,7 +608,7 @@ function get_antenna_temperature(A::Antenna{T},
     return T_b .* A.rad_eff
 end
 
-function get_antenna_temperature(A::Antenna{T},
+function get_antenna_temperature(A::Antenna{T},#TODO: adapt to non-regular grids
     T_b::SphereMap{T},
     ant_traj::Trajectory;
     pre_load_rot_mat::Union{<:AbstractArray{Matrix{T}},Nothing} = nothing) where T
@@ -620,7 +620,7 @@ function get_antenna_temperature(A::Antenna{T},
     # solid angle
     weights = integration_weights(alpha_grid, beta_grid)
 
-    # scale gain by integral factor
+    # scale gain by integral factor #TODO: only works for regular grids
     # scaled_gain = A.gain_pat.spheremap .* sind.(beta_grid') ./ (4π)
     scaled_gain = A.gain_pat.spheremap .* sind.(beta_grid') ./ (4π) .* weights
     
@@ -678,14 +678,12 @@ The antenna trajectory must begin after or at the same time as the first SphereM
 in T_b, as a model needs to be defined for each antenna position.
 
 """
-function get_antenna_temperature(A::Antenna{T},
+function get_antenna_temperature(A::Antenna{T},#TODO: adapt to non-regular grids
     T_b::DimArray{SphereMap{T}},
     ant_traj::Trajectory;
     pre_load_rot_mat::Union{<:AbstractArray{Matrix{T}},Nothing} = nothing) where T
 
     is_TiFreqArray(T_b; strict=true)
-    @assert ant_traj.times[1] >= dims(T_b, :times)[1] "ant_traj must start after or at \
-            the same time as T_b."
 
     # define sampling grids
     alpha_grid = A.gain_pat.alpha_grid
@@ -727,6 +725,11 @@ function get_antenna_temperature(A::Antenna{T},
         # calcul is done on each unique antenna position accounting for T_b
         # model that may change over the times in ant_traj.times[t_c]
         for t_id in unique(T_b_time_ids)
+            # if there is no T_b model for the current antenna time, the antenna
+            # temperature is left at zero
+            if t_id == 0
+                continue
+            end
             # antenna times where the antenna position is ant_coord and the T_b
             # model is of :times index t_id
             ant_times = t_c[T_b_time_ids .== t_id]
