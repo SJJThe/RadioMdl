@@ -42,7 +42,12 @@ function power_pattern_from_cut_file(file_path::String;
         end
         k = header_line+nb_dec+1
     end
-    decimal_places = max(0, -floor(Int, log10(abs(dec_step - round(dec_step)))))
+    res_dec = dec_step - round(dec_step)
+    if res_dec == 0.
+        decimal_places = 0
+    else
+        decimal_places = max(0, -floor(Int, log10(abs(res_dec))))
+    end
     pattern[!,:polar] .= round.(pattern[!,:polar]; digits=decimal_places)
     
     # !!!!!!!!!!!!!!! THIS IS ONLY THE CASE WITH DANIEL'S FORMAT !!!!!!!!!!!!!!!
@@ -119,7 +124,7 @@ function fetch_satellites_info(;
     verb::Bool = false,
     save::Bool = false)
 
-    if "https" in csv_path
+    if occursin("https", csv_path)
         csv_sats_info = String(HTTP.get(csv_path).body)
         sats_catalog = CSV.read(IOBuffer(csv_sats_info), DataFrame)
         # save the fetched csv to reduce access to website
@@ -132,11 +137,17 @@ function fetch_satellites_info(;
     end
 
     if !isnothing(name_filters)
+        if typeof(name_filters) == String
+            name_filters = [name_filters]
+        end
         for filt in name_filters
             filter!(row -> occursin(filt, row.OBJECT_NAME), sats_catalog)
         end
     end
     if !isnothing(avoid_names)
+        if typeof(avoid_names) == String
+            avoid_names = [avoid_names]
+        end
         for filt in avoid_names
             filter!(row -> !(occursin(filt, row.OBJECT_NAME)), sats_catalog)
         end
