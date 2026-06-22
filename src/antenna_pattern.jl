@@ -6,10 +6,13 @@
 Yeilds a 2D-matrix of solid angle weights for the integration over a sphere. The
 weights are defined by 'alpha_grid' and 'beta_grid'.
 
+This function only works for uniform grids.
+
 """
 function integration_weights(alpha_grid::AbstractVector{T},
     beta_grid::AbstractVector{T}) where T
 
+    # check grid is uniform
     dalpha = alpha_grid[2] - alpha_grid[1]
     @assert all(isapprox.(diff(alpha_grid), dalpha; atol=10.0^floor(Int, log10(dalpha))))
     dbeta = beta_grid[2] - beta_grid[1]
@@ -19,21 +22,59 @@ function integration_weights(alpha_grid::AbstractVector{T},
     alpha_rads = deg2rad.(alpha_grid)
     beta_rads = deg2rad.(beta_grid)
     
+    # Detect closure of azimuthal grid (changes integration weights at the edges
+    # as one of the points has a looped neighbor in one case)
+    alpha_closed = isapprox(first(alpha_grid), 0; atol=1e-6*dalpha) &&
+                   isapprox(last(alpha_grid),  360; atol=1e-6*dalpha)
+    
     # dimension weights
-    w_alpha = similar(alpha_rads)
-    for i in eachindex(alpha_rads)
-        lo = i == 1 ? zero(T) : alpha_rads[i] - alpha_rads[i-1]
-        hi = i == lastindex(alpha_rads) ? zero(T) : alpha_rads[i+1] - alpha_rads[i]
-        w_alpha[i] = (lo + hi) / 2
-    end
-    w_beta = similar(beta_rads)
-    for j in eachindex(beta_rads)
-        lo = j == 1 ? zero(T) : beta_rads[j] - beta_rads[j-1]
-        hi = j == lastindex(beta_rads) ? zero(T) : beta_rads[j+1] - beta_rads[j]
-        w_beta[j] = (lo + hi) / 2
-    end
+    w_alpha = _weights_1d(alpha_rads; periodic = !alpha_closed)
+    w_beta  = _weights_1d(beta_rads; periodic = false)   # β never periodic
 
     return w_alpha * w_beta'
+end
+
+function _weights_1d(x::AbstractVector{T}; periodic::Bool) where T
+    n = length(x)
+    w = similar(x)
+    for i in eachindex(x)
+        lo = i == 1 ? (periodic ? x[1]  - (x[end] - T(2π)) : zero(T)) : x[i] - x[i-1]
+        hi = i == n ? (periodic ? (x[1] + T(2π)) - x[end]  : zero(T)) : x[i+1] - x[i]
+        w[i] = (lo + hi) / 2
+    end
+    return w
+end
+
+
+
+"""
+    integrate_spheremap(S::SphereMap;
+                        beta_window = (0, 180),
+                        alpha_window = (0, 360),
+                        normalize = true)
+
+Integrates `S.spheremap` over the angular window defined by `beta_window` (in
+degrees) and `alpha_window` (in degrees), weighted by sin(β). If `normalize`,
+divides by 4π so the result is a sphere fraction; otherwise returns the raw
+solid-angle-weighted integral. 
+
+"""#TODO: update to handle non-uniform grids and put in `coord_frames.jl`
+function integrate_spheremap(S::SphereMap{T};
+    beta_window::Tuple{<:Real,<:Real}  = (0, 180),
+    alpha_window::Tuple{<:Real,<:Real} = (0, 360),
+    normalize::Bool = true) where T
+
+    alpha, beta = S.alpha_grid, S.beta_grid
+    w   = integration_weights(alpha, beta)
+
+    alpha_mask = (alpha .>= alpha_window[1]) .& (alpha .<= alpha_window[2])
+    beta_mask = (beta .>= beta_window[1])  .& (beta .<= beta_window[2])
+    mask   = alpha_mask .* beta_mask'
+
+    integrand = S.spheremap .* sind.(beta') .* w .* mask
+    I = sum(integrand)
+
+    return normalize ? I / (4π) : I
 end
 
 
@@ -60,6 +101,12 @@ function radiated_power_to_gain!(rad_pow::AbstractDataFrame,
     # map the radiated power for interpolation
     rad_pow_map, a, b = map_sphere_coords(rad_pow; alpha_col=alpha_col, 
                                           beta_col=beta_col, map_col=map_col)
+
+    # check grids are covering full sphere (as normalization would not be the same)
+    solid_angle = integrate_spheremap(SphereMap(a, b, ones(T, length(a), length(b)));
+                                      normalize = false)
+    @assert isapprox(solid_angle, 4π; rtol = 1e-3) "Grid does not integrate to 4π — \
+            full-sphere coverage required."
 
     # integrate over the sphere
     rad_pow_avg = trapz((deg2rad.(a), deg2rad.(b)), rad_pow_map .* sind.(b')) / (4π)
@@ -102,7 +149,7 @@ and wavelength.
 function estim_hpbws(diameter::T,
     wavelength::T) where T
 
-    return rad2deg(67.6 * (wavelength / diameter))
+    return 67.6 * (wavelength / diameter)
 end
 
 
