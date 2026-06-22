@@ -176,11 +176,11 @@ function Trajectory(traj::AbstractDataFrame;
     grouped = groupby(traj, time_tag)
     
     # Get sorted unique times and max coords
-    uniq_times = Dates.DateTime.(sort!([first(g[!,time_tag]) for g in grouped]))
+    uniq_times = sort!(unique(traj[!,time_tag]))
     max_coords = maximum(nrow, grouped)
     arr_traj = fill(SphereCoord(NaN, NaN), length(uniq_times), max_coords)
-    for t_idx in eachindex(uniq_times)
-        group = grouped[t_idx]
+    for (t_idx, t) in enumerate(uniq_times)
+        group = grouped[(t,)]
         n_coords = nrow(group)
         arr_traj[t_idx,1:n_coords] = SphereCoord.(mod.(-group[!,azimuth_tag], 360),
                                                   90 .- group[!,elevation_tag],
@@ -397,7 +397,7 @@ struct Antenna{T<:AbstractFloat}
         @assert all(T_phy .>= 0) "physical temperature must be non-negative"
         if typeof(T_phy) <: DimArray
             is_TiFreqArray(T_phy)
-            if :freqs in dims(T_phy)
+            if :freqs in name.(dims(T_phy))
                 @assert valid_freqs[1] .<= T_phy[:freqs] .<= valid_freqs[2] "physical \
                         temperature must be defined for the valid frequency range"
             end
@@ -501,7 +501,7 @@ function get_boresight_gain(A::Antenna)
     gain = A.gain_pat
     i = findmax(gain.spheremap)[2]
 
-    return gain.spheremap[i], gain.alpha_grid[i[2]], gain.beta_grid[i[1]]
+    return gain.spheremap[i], gain.alpha_grid[i[1]], gain.beta_grid[i[2]]
 end
 
 estim_hpbws(A::Antenna, wavelength::Real) = estim_hpbws(A.ant_diameter, wavelength)
@@ -659,7 +659,10 @@ function get_antenna_temperature(A::Antenna{T},#TODO: adapt to non-regular grids
         # integrate over sphere
         # T_As[times=t_c,traj_idx=tr_c] .= trapz((deg2rad.(alpha_grid), 
         #                                         deg2rad.(beta_grid)), wks[threadid()])
-        T_As[times=t_c,traj_idx=tr_c] .= dot(scaled_gain, T_b_in_ant)
+        v = dot(scaled_gain, T_b_in_ant)
+        for k in eachindex(t_c)
+            T_As[times=t_c[k],traj_idx=tr_c[k]] = v
+        end
     end
 
     return T_As
@@ -733,15 +736,16 @@ function get_antenna_temperature(A::Antenna{T},#TODO: adapt to non-regular grids
             # antenna times where the antenna position is ant_coord and the T_b
             # model is of :times index t_id
             ant_times = t_c[T_b_time_ids .== t_id]
+            ant_tr = tr_c[T_b_time_ids .== t_id]
 
             # select SphereMap from latest time before current antenna time
             T_b_t = T_b[times=t_id,freqs=1]
 
             # convert the map coordinates (same for all frequencies) of spheremap
             # to antenna frame using precomputed rot_mat for ant_coord
-            new_map_coords = pass_frame_to_frame(T_b_t, ant_coord, alpha_grid, 
-                                                 beta_grid; grid_only=true,
-                                       pre_load_rot_mat=pre_load_rot_mat[t_c[1],tr_c[1]])
+            # new_map_coords = pass_frame_to_frame(T_b_t, ant_coord, alpha_grid, 
+            #                                      beta_grid; grid_only=true,
+            #                            pre_load_rot_mat=pre_load_rot_mat[t_c[1],tr_c[1]])
             
             @threads for f in axes(T_b, :freqs)    
                 # select SphereMap from latest time before current antenna time
@@ -769,8 +773,10 @@ function get_antenna_temperature(A::Antenna{T},#TODO: adapt to non-regular grids
                 # T_As[times=t_c,traj_idx=tr_c] .= trapz((deg2rad.(alpha_grid), 
                 #                                         deg2rad.(beta_grid)), 
                 #                                         wks[threadid()])
-                T_As[times=ant_times,freqs=f,traj_idx=tr_c] .= dot(scaled_gain, 
-                                                                   T_b_in_ant)
+                v = dot(scaled_gain, T_b_in_ant)
+                for k in eachindex(ant_times)
+                    T_As[times=ant_times[k],freqs=f,traj_idx=ant_tr[k]] = v
+                end
             end
         end
     end
@@ -864,7 +870,7 @@ function Receiver(freq_res::T,
     bw::T,
     gain_amps::T,
     T_rx::Union{T,DimArray{T}},
-    freq_resp::Vector{T}) where {T<:AbstractFloat}
+    freq_resp::AbstractVector{T}) where {T<:AbstractFloat}
     
     freq_grid = freq_range(freq_res, cent_freq, bw)
     freq_resp_array = TiFreqArray(freq_resp, collect(freq_grid))
@@ -935,7 +941,7 @@ struct Instrument{T<:AbstractFloat,U<:Union{T,AbstractVector{T}}}
         receiver::Receiver{T},
         coords::Dict{Symbol,U} = 
                 Dict(:lat => 0.,:lon => 0.,:alt=>0.)) where {T<:AbstractFloat,
-                                                             U<:Union{T,AbstractVector{T}}}
+                                                        U<:Union{T,AbstractVector{T}}}
 
         ant_fmin, ant_fmax = antenna.valid_freqs
         cent_freq = receiver.cent_freq
@@ -944,9 +950,14 @@ struct Instrument{T<:AbstractFloat,U<:Union{T,AbstractVector{T}}}
         @assert (ant_fmin <= cent_freq - bw/2) && 
                 (cent_freq + bw/2 <= ant_fmax) "the receiver does not cover the \
                 antenna valid frequency range"
-        if length(coords[:lat]) > 1 && (size(receiver.T_rx,:times) > 1 || 
-                                        size(antenna.T_phy,:times) > 1)
-            max_T_length = max(size(receiver.T_rx,:times), size(antenna.T_phy,:times))
+        if length(coords[:lat]) > 1
+            max_T_length = length(coords[:lat])
+            if is_TiFreqArray(receiver.T_rx)
+                max_T_length = size(receiver.T_rx,:times)
+            end
+            if is_TiFreqArray(antenna.T_phy)
+                max_T_length = max(max_T_length, size(antenna.T_phy,:times))
+            end
             @assert length(coords[:lat]) == max_T_length "the length of coords must \
                     match the first dimension (time) of T_rx and T_phy, if they are \
                     time dependent"
@@ -1307,14 +1318,13 @@ struct MovingExtendSrcTemp{T<:AbstractFloat} <: AbstractBkg
     function MovingExtendSrcTemp(temp::DimArray{SphereMap{T}},
         traj::Trajectory) where {T<:AbstractFloat}
 
-        @error true "This structure 'get_antenna_temperature' is not implemented yet"
-
         @assert :times in name.(dims(temp)) "temp must have a :times dimension"
 
         @assert traj.times == Array(dims(temp, :times)) "temp and traj must have the \
                 same times"
 
-        @assert axes(traj.traj,2) == 1 "traj must have only one coordinate per time stamp"
+        @assert length(axes(traj.traj,2)) == 1 "traj must have only one coordinate per \
+                time stamp"
 
         return new{T}(temp, traj)
     end
@@ -1338,7 +1348,7 @@ function MovingExtendSrcTemp(temp::SphereMap{T},
         last_coord = moving_coords
     end
 
-    return DimArray(temp_vec, (Dim{:Times}(traj.times)))
+    return DimArray(temp_vec, (Dim{:times}(traj.times)))
 end
 
 function get_antenna_temperature(A::Antenna{T},
