@@ -59,8 +59,41 @@ struct SphereCoord{T<:AbstractFloat}
         beta::T,
         r::T = one(T)) where T<:AbstractFloat
         
-        new{T}(mod(alpha, T(360)), mod(beta, T(180)), r)
+        α, β, ρ = _normalize_sphere(alpha, beta, r)
+
+        return new{T}(α, β, ρ)
     end
+end
+
+@inline function _normalize_sphere(alpha::T,
+    beta::T,
+    r::T) where T<:AbstractFloat
+
+    α, β, ρ = alpha, beta, r
+
+    # Handle negative radius: flip through origin
+    if ρ < 0
+        ρ = -ρ
+        α += T(180)
+        β  = T(180) - β
+    end
+
+    # Reduce β to [0, 360); reflect if it lands in (180, 360)
+    β = mod(β, T(360))
+    if β > T(180)
+        β = T(360) - β
+        α += T(180)
+    end
+
+    # Now β ∈ [0, 180]; reduce α to [0, 360)
+    α = mod(α, T(360))
+
+    # Optional: at the poles α is undefined; canonicalize to 0
+    if β == 0 || β == T(180)
+        α = zero(T)
+    end
+
+    return α, β, ρ
 end
 #TODO: add kwd for if elevation and azimuth are given
 
@@ -71,6 +104,8 @@ end
                ranges::Bool = false) where T
 
 Returns the sum of two spherical coordinates '(α,β,r)' in the '(X,Y,Z)' frame.
+Note that the resulting spherical coordinates is not equivalent to a rotation of
+the original coordinates.
 
 """
 function add_coords(a::SphereCoord{T},
@@ -152,7 +187,7 @@ The angles must be in degrees.
 
 """
 struct SphereMap{T,V<:AbstractVector{T},M<:AbstractMatrix{T},
-                 I<:Interpolations.GriddedInterpolation}
+                 I<:Interpolations.GriddedInterpolation}#TODO: adapt to non-regular grids
     alpha_grid::V
     beta_grid::V
     spheremap::M
@@ -389,17 +424,22 @@ function map_sphere_coords(spheremap::AbstractDataFrame;
     alpha_col::Symbol = :caz,
     beta_col::Symbol = :polar,
     map_col::Symbol = :gains)
-    
-    alpha_grid = unique(spheremap[!, alpha_col])
-    beta_grid = unique(spheremap[!, beta_col])
+
+    a_col = spheremap[!, alpha_col]
+    b_col = spheremap[!, beta_col]
+    m_col = spheremap[!, map_col]
+
+    alpha_grid = sort(unique(a_col))
+    beta_grid = sort(unique(b_col))
 
     # form 2D matrix for interpolation argument
-    # add first column as last column to loop horizontal coordinates
-    map_vec = spheremap[!, map_col]
-    map_values = zeros(eltype(map_vec), length(alpha_grid), length(beta_grid))
-    for (i, a) in enumerate(alpha_grid)
-        beta_col_a = subset(spheremap, alpha_col => caz -> caz .== a; view=true)[!,map_col]
-        map_values[i,:] .= beta_col_a
+    a_idx =  Dict(a => i for (i, a) in enumerate(alpha_grid))
+    b_idx = Dict(b => j for (j, b) in enumerate(beta_grid))
+    map_values = zeros(eltype(m_col), length(alpha_grid), length(beta_grid))
+    @inbounds for k in eachindex(a_col)
+        i = a_idx[a_col[k]]
+        j = b_idx[b_col[k]]
+        map_values[i, j] = m_col[k]
     end
 
     return map_values, alpha_grid, beta_grid
@@ -416,7 +456,7 @@ Yields the interpolation of the 'spheremap' matrix given the angles 'alphas' and
 'betas' in degrees.
 
 """
-function interpolate_sphere_map(spheremap::AbstractMatrix{T},
+function interpolate_sphere_map(spheremap::AbstractMatrix{T},#TODO: adapt to non-regular grids
     alphas::AbstractVector{T},
     betas::AbstractVector{T}) where T
     
