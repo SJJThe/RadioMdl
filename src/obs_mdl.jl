@@ -43,7 +43,8 @@ function model_observ_psd!(obs::Observation{T},
     for co in constellation
         # link budget model for constellation
         lnk_bdgt = co.lnk_bdgt_mdl
-        @threads for t in eachindex(time_samps)    
+        # different constellation may have different load hence the :dynamic here
+        @threads :dynamic for t in eachindex(time_samps)
             # get pointing positions of antenna
             t_samp = time_samps[t]
             ant_coords = ant_traj.traj[t,:]

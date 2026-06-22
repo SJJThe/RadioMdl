@@ -35,7 +35,7 @@ function simple_link_budget(gain_RX::T,
 
     L = free_space_loss(rng, freq)
 
-    return gain_RX * 1/L * gain_TX
+    return gain_RX * gain_TX / L
 end
 
 
@@ -44,7 +44,7 @@ end
     classic_gain_link_budget(sat_coord::SphereCoord{T},
                              sat_instru::Instrument{T},
                              tel_pointing_coord::SphereCoord{T},
-                             tel_instru::Instrument{T};
+                             tel_instru::Antenna{T};
                              pre_load_rot_mat::Union{Matrix,Nothing} = nothing,
                              simple_approx::Bool = false,
                              beam_avoid_angle::T = 0.0,
@@ -83,6 +83,9 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
     beam_avoid_angle::T = 0.0,
     turn_off::Bool = false) where T
 
+    # frequency bins of receiver
+    freq_bins = freq_range(sat_instru.receiver)
+
     # coordinate of sat in telescope frame
     sat_coord_in_tel = pass_frame_to_frame(sat_coord, tel_pointing_coord; 
                                            pre_load_rot_mat=pre_load_rot_mat)
@@ -95,7 +98,7 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
         tel_coord_in_sat = SphereCoord(-tel_pointing_coord.alpha, 
                                        tel_pointing_coord.beta, sat_coord.r)
     else
-        @error "3D transform handling is not yet implemented"#tel_coord_in_sat = #FIXME: pass to ECEF as intermediate
+        error("3D transform handling is not yet implemented")#tel_coord_in_sat = #FIXME: pass to ECEF as intermediate
     end
 
     # beam avoidance effect
@@ -110,24 +113,24 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
         if simple_approx
             sat_beam_coord_topo = SphereCoord(-sat_beam_alpha, sat_beam_beta, 1.)
         else
-            @error "3D transform handling is not yet implemented"#sat_beam_coord_topo = #FIXME: pass to ECEF as intermediate
+            error("3D transform handling is not yet implemented")#sat_beam_coord_topo = #FIXME: pass to ECEF as intermediate
         end
 
         # co-azimuthal angles are closer than beam_avoid_angle (satellite close
         # to telescope boresight)
         if abs(sat_beam_coord_topo.alpha - tel_pointing_coord.alpha) < beam_avoid_angle
             if turn_off
-                return zero(T)
+                return zeros(T, length(freq_bins))
             else
-                tel_coord_in_sat.alpha = mod(sat_beam_alpha + 45., 360.)
+                tel_coord_in_sat = add_coords(tel_coord_in_sat, SphereCoord(45., 0., 0.))
             end
         # polar angles are closer than beam_avoid_angle (satellite close to
         # telescope broesight)
         elseif abs(sat_beam_coord_topo.beta - tel_pointing_coord.beta) < beam_avoid_angle
             if turn_off
-                return zero(T)
+                return zeros(T, length(freq_bins))
             else
-                tel_coord_in_sat.beta = mod(sat_beam_beta + 45., 180.)
+                tel_coord_in_sat = add_coords(tel_coord_in_sat, SphereCoord(0., 45., 0.))
             end
         end
     end
@@ -136,7 +139,6 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
     gain_sat = get_gain_value(sat_instru.antenna, tel_coord_in_sat)
 
     #link budget
-    freq_bins = freq_range(sat_instru.receiver)
     link_budget_coefs = [simple_link_budget(gain_tel, gain_sat, sat_coord.r, f) 
                          for f in freq_bins]
 

@@ -6,7 +6,7 @@
 
 Yields the frequency range centered on freq_center and of length nb_freq_bins.
 The range is created such as the grid frequencies are always integer multiples
-of the frequnecy resolution 'freq_res'.
+of the frequency resolution 'freq_res'. Hence, some frequencies might be dropped.
 
 """
 function freq_range(freq_res::T,
