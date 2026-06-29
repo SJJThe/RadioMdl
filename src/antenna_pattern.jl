@@ -14,9 +14,9 @@ function integration_weights(alpha_grid::AbstractVector{T},
 
     # check grid is uniform
     dalpha = alpha_grid[2] - alpha_grid[1]
-    @assert all(isapprox.(diff(alpha_grid), dalpha; atol=10.0^floor(Int, log10(dalpha))))
+    @assert all(isapprox.(diff(alpha_grid), dalpha; atol=1e-6*dalpha))
     dbeta = beta_grid[2] - beta_grid[1]
-    @assert all(isapprox.(diff(beta_grid), dbeta; atol=10.0^floor(Int, log10(dbeta))))
+    @assert all(isapprox.(diff(beta_grid), dbeta; atol=1e-6*dbeta))
 
     # convert to radians
     alpha_rads = deg2rad.(alpha_grid)
@@ -28,7 +28,7 @@ function integration_weights(alpha_grid::AbstractVector{T},
                    isapprox(last(alpha_grid),  360; atol=1e-6*dalpha)
     
     # dimension weights
-    w_alpha = _weights_1d(alpha_rads; periodic = !alpha_closed)
+    w_alpha = _weights_1d(alpha_rads; periodic = alpha_closed)
     w_beta  = _weights_1d(beta_rads; periodic = false)   # β never periodic
 
     return w_alpha * w_beta'
@@ -63,7 +63,7 @@ function integrate_spheremap(S::SphereMap{T};
     beta_window::Tuple{<:Real,<:Real}  = (0, 180),
     alpha_window::Tuple{<:Real,<:Real} = (0, 360),
     normalize::Bool = true) where T
-
+    
     alpha, beta = S.alpha_grid, S.beta_grid
     w   = integration_weights(alpha, beta)
 
@@ -103,7 +103,8 @@ function radiated_power_to_gain!(rad_pow::AbstractDataFrame,
                                           beta_col=beta_col, map_col=map_col)
 
     # check grids are covering full sphere (as normalization would not be the same)
-    solid_angle = integrate_spheremap(SphereMap(a, b, ones(T, length(a), length(b)));
+    solid_angle = integrate_spheremap(SphereMap(a, b, ones(eltype(rad_pow_map), 
+                                                length(a), length(b)));
                                       normalize = false)
     @assert isapprox(solid_angle, 4π; rtol = 1e-3) "Grid does not integrate to 4π — \
             full-sphere coverage required."

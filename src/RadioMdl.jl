@@ -41,6 +41,8 @@ export AbstractBkg,
        ground_model,
        Instrument,
        instrument_psd_stat,
+       integrate_spheremap,#FIXME: move to coord_frames.jl
+       integration_weights,#FIXME: move to coord_frames.jl
        k_boltz,
        MovingExtendSrcTemp,
        model_observ_psd!,
