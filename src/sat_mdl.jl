@@ -176,7 +176,7 @@ function epfd_link_budget(sat_coord::SphereCoord{T},
     tel_antenna = tel_instru.antenna
 
     # telescope gain
-    gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel)
+    gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel) / get_boresight_gain(tel_antenna)[1]
     
     return gain_tel / (4π * sat_coord.r^2)
 end
