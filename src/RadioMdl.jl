@@ -1,3 +1,4 @@
+
 module RadioMdl
 
 export AbstractBkg,
@@ -11,9 +12,13 @@ export AbstractBkg,
        atmosphere_model,
        Constellation,
        classic_gain_link_budget,
+       compute_sats_traj,
+       compute_sats_traj_py,
+       epfd_link_budget,
        estim_casA_flux,
-       estim_hpbws,
+       estim_hpbw,
        estim_virgoA_flux,
+       fetch_satellites_info,
        flux_to_temperature,
        form_satellites_list,
        freq_range,
@@ -50,10 +55,13 @@ export AbstractBkg,
        offset_angle_trajectory!,
        PointLikeSrcFlux,
        power_to_temperature,
+       propagate_sats_position,
        Receiver,
        radiated_power_to_gain!,
+       read_sats_orbit_info,
        read_VGOS_antenna_traj,
        Satellite,
+       SatPos,
        SkyMdl,
        SphereCoord,
        SphereMap,
@@ -61,6 +69,8 @@ export AbstractBkg,
        Trajectory,
        temperature_to_flux,
        temperature_to_power,
+       url_celestrak,
+       url_starlink_celestrak,
        wave_to_freq
 
 using Arrow
@@ -69,7 +79,6 @@ using DataFrames
 using Dates
 using DelimitedFiles
 using DimensionalData
-using HTTP
 using Interpolations
 using InterpolationKernels
 using LinearInterpolators
@@ -97,8 +106,8 @@ include("antenna_pattern.jl")
 include("rx_mdl.jl")
 include("astro_mdl.jl")
 include("types.jl")
-# include("satellite_position.jl")
-# using .SatPos
+include("satellite_position.jl")
+using .SatPos
 include("sat_mdl.jl")
 include("obs_mdl.jl")
 

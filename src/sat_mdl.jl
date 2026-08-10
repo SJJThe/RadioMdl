@@ -44,7 +44,7 @@ end
     classic_gain_link_budget(sat_coord::SphereCoord{T},
                              sat_instru::Instrument{T},
                              tel_pointing_coord::SphereCoord{T},
-                             tel_instru::Antenna{T};
+                             tel_instru::Instrument{T};
                              pre_load_rot_mat::Union{Matrix,Nothing} = nothing,
                              simple_approx::Bool = false,
                              beam_avoid_angle::T = 0.0,
@@ -62,7 +62,6 @@ If 'simple_approx' is true, the satellite coordinates are approximated in the
 telescope frame by negating the azimuthal angle and keeping the polar angle
 unchanged. 
 
-#FIXME:NOT YET IMPLEMENTED
 If it is 'false', the satellite coordinates are transformed from the
 topocentric frame to the telescope's antenna frame by passing via an
 intermediate Earth-Centered Earth-Fixed (ECEF) frame.
@@ -77,7 +76,7 @@ is true, the satellite gain is set to zero instead of being steered away.
 function classic_gain_link_budget(sat_coord::SphereCoord{T},
     sat_instru::Instrument{T},
     tel_pointing_coord::SphereCoord{T},
-    tel_antenna::Antenna{T};
+    tel_instru::Instrument{T};
     pre_load_rot_mat::Union{Matrix,Nothing} = nothing,
     simple_approx::Bool = false,
     beam_avoid_angle::T = 0.0,
@@ -87,8 +86,11 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
     freq_bins = freq_range(sat_instru.receiver)
 
     # coordinate of sat in telescope frame
-    sat_coord_in_tel = pass_frame_to_frame(sat_coord, tel_pointing_coord; 
+    sat_coord_in_tel = pass_frame_to_frame(sat_coord, tel_pointing_coord;
                                            pre_load_rot_mat=pre_load_rot_mat)
+
+    # telescope antenna
+    tel_antenna = tel_instru.antenna
 
     # telescope gain
     gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel)
@@ -97,40 +99,44 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
     if simple_approx # if sat is close to zenith
         tel_coord_in_sat = SphereCoord(-tel_pointing_coord.alpha, 
                                        tel_pointing_coord.beta, sat_coord.r)
+        R_ned = nothing
+        R_enu = nothing
     else
-        error("3D transform handling is not yet implemented")#tel_coord_in_sat = #FIXME: pass to ECEF as intermediate
+        isnothing(tel_instru.coords) && error("tel_instru.coords (Dict with :lat, :lon, \
+                                               :alt) is required when simple_approx is \
+                                               false.")
+        (tel_coord_in_sat, R_ned_s, 
+         R_nwz_t) = tel_dir_in_sat_frame(sat_coord, tel_instru.coords[:lat],
+                                         tel_instru.coords[:lon], 
+                                         tel_instru.coords[:alt])
     end
 
     # beam avoidance effect
-    if beam_avoid_angle > 0.
-        # # get boresight pointing of telescope antenna
-        # tel_beam_alpha, tel_beam_beta = get_boresight_gain(tel_instru.antenna)[2:3]
-
+    if beam_avoid_angle > zero(T)
         # get boresight pointing of satellite antenna
         sat_beam_alpha, sat_beam_beta = get_boresight_gain(sat_instru.antenna)[2:3]
-
+        
         # transform satellite beam coords in topocentric frame
         if simple_approx
             sat_beam_coord_topo = SphereCoord(-sat_beam_alpha, sat_beam_beta, 1.)
         else
-            error("3D transform handling is not yet implemented")#sat_beam_coord_topo = #FIXME: pass to ECEF as intermediate
+            # boresight (antenna frame, X=North,Y=East,Z=Nadir) → ECEF → topo
+            v_ned  = spher_to_cart_coord(sat_beam_alpha, sat_beam_beta, 1.0)
+            v_ecef = R_ned_s * v_ned
+            v_t  = R_nwz_t' * v_ecef
+            alpha_b, beta_b = cart_to_sphe_coord(v_t[1], v_t[2], v_t[3])[1:2]
+            sat_beam_coord_topo = SphereCoord(alpha_b, beta_b, 1.0)
         end
 
-        # co-azimuthal angles are closer than beam_avoid_angle (satellite close
-        # to telescope boresight)
-        if abs(sat_beam_coord_topo.alpha - tel_pointing_coord.alpha) < beam_avoid_angle
+        # angular distance between sat boresight and telescope pointing are
+        # closer than beam_avoid_angle
+        if angular_separation(sat_beam_coord_topo, tel_pointing_coord) < beam_avoid_angle
             if turn_off
                 return zeros(T, length(freq_bins))
             else
-                tel_coord_in_sat = add_coords(tel_coord_in_sat, SphereCoord(45., 0., 0.))
-            end
-        # polar angles are closer than beam_avoid_angle (satellite close to
-        # telescope broesight)
-        elseif abs(sat_beam_coord_topo.beta - tel_pointing_coord.beta) < beam_avoid_angle
-            if turn_off
-                return zeros(T, length(freq_bins))
-            else
-                tel_coord_in_sat = add_coords(tel_coord_in_sat, SphereCoord(0., 45., 0.))
+                tel_coord_in_sat = SphereCoord(sat_beam_alpha,
+                                               mod(sat_beam_beta + T(45), T(180)),
+                                               sat_coord.r)
             end
         end
     end
@@ -139,8 +145,39 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
     gain_sat = get_gain_value(sat_instru.antenna, tel_coord_in_sat)
 
     #link budget
-    link_budget_coefs = [simple_link_budget(gain_tel, gain_sat, sat_coord.r, f) 
-                         for f in freq_bins]
-
-    return link_budget_coefs
+    return [simple_link_budget(gain_tel, gain_sat, sat_coord.r, f) for f in freq_bins]
 end
+
+
+
+"""
+    epfd_link_budget(sat_coord::SphereCoord{T},
+                     sat_instru::Instrument{T},
+                     tel_pointing_coord::SphereCoord{T},
+                     tel_instru::Instrument{T};
+                     pre_load_rot_mat::Union{Matrix,Nothing} = nothing) where T
+
+Compute the EIRP link budget for a satellite and a telescope, that is:
+
+    gain_telescope(in satellite direction) / (4π * satellite_range^2)
+
+"""
+function epfd_link_budget(sat_coord::SphereCoord{T},
+    sat_instru::Instrument{T},
+    tel_pointing_coord::SphereCoord{T},
+    tel_instru::Instrument{T};
+    pre_load_rot_mat::Union{Matrix,Nothing} = nothing) where T
+    
+    # coordinate of sat in telescope frame
+    sat_coord_in_tel = pass_frame_to_frame(sat_coord, tel_pointing_coord;
+                                           pre_load_rot_mat=pre_load_rot_mat)
+
+    # telescope antenna
+    tel_antenna = tel_instru.antenna
+
+    # telescope gain
+    gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel)
+    
+    return gain_tel / (4π * sat_coord.r^2)
+end
+
