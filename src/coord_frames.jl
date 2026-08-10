@@ -24,6 +24,7 @@ module CoordFrames#FIXME: rename file to same name as module
 
 using DataFrames
 using Interpolations
+using LoopVectorization
 
 export add_coords,
        cart_to_sphe_coord,
@@ -45,7 +46,8 @@ export add_coords,
                 r::T = one(T)) where T<:AbstractFloat
 
 Defines the spherical coordinates '(α,β,r)' of a point in the '(X,Y,Z)' frame,
-with 'α' ∈ [0, 360], 'β' ∈ [0, 180].
+with 'α' ∈ [0, 360], 'β' ∈ [0, 180]. The radius 'r' defaults to 1 to handle
+rotation in the unit circle.
 
 See ['CoordFrames'](@ref)
 
@@ -88,10 +90,10 @@ end
     # Now β ∈ [0, 180]; reduce α to [0, 360)
     α = mod(α, T(360))
 
-    # Optional: at the poles α is undefined; canonicalize to 0
-    if β == 0 || β == T(180)
-        α = zero(T)
-    end
+    # # Optional: at the poles α is undefined; canonicalize to 0
+    # if β == 0 || β == T(180)
+    #     α = zero(T)
+    # end
 
     return α, β, ρ
 end
@@ -101,7 +103,8 @@ end
 """
     add_coords(a::SphereCoord{T},
                b::SphereCoord{T};
-               ranges::Bool = false) where T
+               ranges::Bool = false,
+               subtract_angles::Bool = false) where T
 
 Returns the sum of two spherical coordinates '(α,β,r)' in the '(X,Y,Z)' frame.
 Note that the resulting spherical coordinates is not equivalent to a rotation of
@@ -110,9 +113,30 @@ the original coordinates.
 """
 function add_coords(a::SphereCoord{T},
     b::SphereCoord{T};
-    ranges::Bool = false) where T
+    ranges::Bool = false,
+    subtract_angles::Bool = false) where T
 
-    return SphereCoord(a.alpha + b.alpha, a.beta + b.beta, ranges ? a.r + b.r : one(T))
+    if subtract_angles
+        return SphereCoord(a.alpha - b.alpha, a.beta - b.beta, ranges ? a.r + b.r : one(T))
+    else
+        return SphereCoord(a.alpha + b.alpha, a.beta + b.beta, ranges ? a.r + b.r : one(T))
+    end
+end
+
+
+
+"""
+    _is_regular(grid; rtol = 1e-6)
+
+True if `grid` is (approximately) uniformly spaced.
+
+"""
+function _is_regular(grid::AbstractVector{T}; 
+    rtol = 1e-6) where T
+
+    length(grid) < 3 && return true
+    d = diff(grid)
+    return all(isapprox.(d, d[1]; rtol = rtol))
 end
 
 
@@ -121,7 +145,7 @@ end
     SphereMap(alpha_grid::AbstractVector{T},
               beta_grid::AbstractVector{T}, 
               spheremap::AbstractMatrix{T}, 
-              interp_map::I) where {T,I<:Interpolations.GriddedInterpolation}
+              interp_map::I) where {T,I<:Interpolations.AbstractInterpolation}
 
 Defines a spherical mapping in a '(X,Y,Z)' coordinate frame, where 'alpha_grid'
 and 'beta_grid' are sampled grids respectively defining the angles between 'X'
@@ -187,17 +211,19 @@ The angles must be in degrees.
 
 """
 struct SphereMap{T,V<:AbstractVector{T},M<:AbstractMatrix{T},
-                 I<:Interpolations.GriddedInterpolation}#TODO: adapt to non-regular grids
+                 I<:Interpolations.AbstractInterpolation}
     alpha_grid::V
     beta_grid::V
     spheremap::M
     interp_map::I
+    regular_grid::Bool
 
     function SphereMap(alpha_grid::V,
         beta_grid::V,
         spheremap::M,
-        interp_map::I) where {T,V<:AbstractVector{T},M<:AbstractMatrix{T},
-                              I<:Interpolations.GriddedInterpolation}
+        interp_map::I,
+        regular_grid::Bool = false) where {T,V<:AbstractVector{T},M<:AbstractMatrix{T},
+                              I<:Interpolations.AbstractInterpolation}
         
         if length(alpha_grid) == 1 && alpha_grid[1] == 0
             # @warn "alpha_grid contains only origin, expand to two values assuming \
@@ -214,7 +240,9 @@ struct SphereMap{T,V<:AbstractVector{T},M<:AbstractMatrix{T},
         @assert length(beta_grid) == size(spheremap, 2) == size(interp_map, 2)
         @assert eltype(interp_map) == eltype(spheremap)
 
-        new{T,V,M,I}(alpha_grid, beta_grid, spheremap, interp_map)
+        regular_grid = _is_regular(alpha_grid) && _is_regular(beta_grid)
+
+        new{T,V,M,I}(alpha_grid, beta_grid, spheremap, interp_map, regular_grid)
     end
 end
 
@@ -223,9 +251,10 @@ function SphereMap(alpha_grid::AbstractVector{T},
     spheremap::AbstractMatrix{T}) where T
 
     # create the interpolator
-    interp_map = interpolate_sphere_map(spheremap, alpha_grid, beta_grid)
+    regular_grid = _is_regular(alpha_grid) && _is_regular(beta_grid)
+    interp_map = interpolate_sphere_map(spheremap, alpha_grid, beta_grid; regular_grid=regular_grid)
 
-    return SphereMap(alpha_grid, beta_grid, spheremap, interp_map)
+    return SphereMap(alpha_grid, beta_grid, spheremap, interp_map, regular_grid)
 end
 
 function SphereMap(spheremap::AbstractDataFrame;
@@ -238,10 +267,16 @@ end
 
 get_angle_grids(SM::SphereMap) = (SM.alpha_grid, SM.beta_grid)
 
-get_angle_resolution(SM::SphereMap) = (SM.alpha_grid[2] - SM.alpha_grid[1],
-                                       SM.beta_grid[2] - SM.beta_grid[1])
-
-
+function get_angle_resolution(SM::SphereMap)
+    
+    if SM.regular_grid
+        return (SM.alpha_grid[2] - SM.alpha_grid[1], SM.beta_grid[2] - SM.beta_grid[1])
+    else
+        dalpha = diff(SM.alpha_grid)
+        dbeta = diff(SM.beta_grid)
+        return ((minimum(dalpha), maximum(dalpha)), (minimum(dbeta), maximum(dbeta)))
+    end
+end
 
 """
     get_common_grid(S1::SphereMap, S2::SphereMap)
@@ -254,20 +289,26 @@ between the two maps.
 """
 function get_common_grid(S1::SphereMap, S2::SphereMap)
 
-    # define smallest resolution in the 2 dimensions
-    res = min.(get_angle_resolution(S1), get_angle_resolution(S2))
-
-    # define min and max values of joint SphereMap alphas and betas
-    grids1 = get_angle_grids(S1)
-    grids2 = get_angle_grids(S2)
-    alpha_min = min(minimum(grids1[1]), minimum(grids2[1]))
-    alpha_max = max(maximum(grids1[1]), maximum(grids2[1]))
-    beta_min = min(minimum(grids1[2]), minimum(grids2[2]))
-    beta_max = max(maximum(grids1[2]), maximum(grids2[2]))
-
-    # create new sampling grid 
-    samp_alpha_grid = collect(alpha_min:res[1]:alpha_max)
-    samp_beta_grid = collect(beta_min:res[2]:beta_max)
+    if S1.regular_grid && S2.regular_grid
+        # define smallest resolution in the 2 dimensions
+        res = min.(get_angle_resolution(S1), get_angle_resolution(S2))
+        
+        # define min and max values of joint SphereMap alphas and betas
+        grids1 = get_angle_grids(S1)
+        grids2 = get_angle_grids(S2)
+        alpha_min = min(minimum(grids1[1]), minimum(grids2[1]))
+        alpha_max = max(maximum(grids1[1]), maximum(grids2[1]))
+        beta_min = min(minimum(grids1[2]), minimum(grids2[2]))
+        beta_max = max(maximum(grids1[2]), maximum(grids2[2]))
+        
+        # create new sampling grid 
+        samp_alpha_grid = collect(alpha_min:res[1]:alpha_max)
+        samp_beta_grid = collect(beta_min:res[2]:beta_max)
+    else
+        # union of the two grids
+        samp_alpha_grid = sort(unique(vcat(S1.alpha_grid, S2.alpha_grid)))
+        samp_beta_grid = sort(unique(vcat(S1.beta_grid, S2.beta_grid)))
+    end
 
     return samp_alpha_grid, samp_beta_grid
 end
@@ -300,6 +341,7 @@ end
 Base.show(io::IO, SM::SphereMap{T}) where {T} = begin 
     print(io, "SphereMap{$T}:\n")
     print(io, "sample grid size: $(size(SM.spheremap))\n")
+    print(io, "grid prms: $(SM.regular_grid ? "regular" : "irregular (min, max)")\n")
     print(io, "angles resolutions (degrees): $(get_angle_resolution(SM))\n")
 end
 
@@ -357,34 +399,77 @@ Uses 'pass_frame_to_frame' on a 'SphereMap' given a 'SphereCoord' to define the
 orientation of the new frame.
 
 """
-function pass_frame_to_frame(SM::SphereMap{T},
-    Gamma::Real,#FIXME:change name varaibles
-    Psi::Real,#FIXME:change name varaibles
+function pass_frame_to_frame(SM::SphereMap{T},#FIXME: vectorized version
+    Gamma::Real,
+    Psi::Real,
     new_alpha_grid::AbstractVector{T} = SM.alpha_grid, 
     new_beta_grid::AbstractVector{T} = SM.beta_grid;
-    grid_only::Bool = false,
-    kwds...) where T
-    
-    itp = SM.interp_map
-    map_type = grid_only ? Tuple{Float64, Float64} : T
-    new_map = Matrix{map_type}(undef, length(new_alpha_grid), length(new_beta_grid))
-    @inbounds for b in eachindex(new_beta_grid)#TODO: maybe manually vectorized
-        @simd for a in eachindex(new_alpha_grid)
-            # For each point in NEW frame, find where it came from in OLD frame
-            alpha_orig, beta_orig = pass_frame_to_frame(new_alpha_grid[a], 
-                                                        new_beta_grid[b], Gamma, Psi;
-                                                        inverse = true,
-                                                        kwds...)
+    pre_load_rot_mat::Union{Nothing, Matrix{T}} = nothing,
+    inverse::Bool = false) where T
 
-            if grid_only
-                # return original angles
-                new_map[a,b] = (alpha_orig, beta_orig)
-            else
-                # sample original pattern
-                new_map[a,b] = itp(alpha_orig, beta_orig)
-            end
+    # parameters
+    itp = SM.interp_map
+    Na, Nb = length(new_alpha_grid), length(new_beta_grid)
+
+    # rotation matrix for new frame
+    R = isnothing(pre_load_rot_mat) ? rot_mat(Gamma, Psi) : pre_load_rot_mat
+    Rt = inverse ? R : R'
+
+    # Precompute trig once per axis (outer products give the full grid)
+    sinα = sind.(new_alpha_grid);  cosα = cosd.(new_alpha_grid)   # length Na
+    sinβ = sind.(new_beta_grid);   cosβ = cosd.(new_beta_grid)    # length Nb
+
+    # compute all source (α, β) for the destination grid
+    α_orig = Matrix{T}(undef, Na, Nb)
+    β_orig = Matrix{T}(undef, Na, Nb)
+    
+    @turbo for j in 1:Nb
+        for i in 1:Na
+            x = sinβ[j]*cosα[i]; y = sinβ[j]*sinα[i]; z = cosβ[j]
+            xr = Rt[1,1]*x + Rt[1,2]*y + Rt[1,3]*z
+            yr = Rt[2,1]*x + Rt[2,2]*y + Rt[2,3]*z
+            zr = Rt[3,1]*x + Rt[3,2]*y + Rt[3,3]*z
+            α_orig[i,j] = mod(atan(yr, xr)*(180/π), 360)
+            β_orig[i,j] = acos(clamp(zr,-1,1))*(180/π)
         end
     end
+
+    map_type = #=grid_only ? Tuple{Float64, Float64} : =#T
+    new_map = Matrix{map_type}(undef, length(new_alpha_grid), length(new_beta_grid))
+    @inbounds for idx in eachindex(α_orig)
+        new_map[idx] = itp(α_orig[idx], β_orig[idx])
+    end
+########################################################################################
+# end
+
+# function pass_frame_to_frame(SM::SphereMap{T},
+#     Gamma::Real,#FIXME:change name varaibles
+#     Psi::Real,#FIXME:change name varaibles
+#     new_alpha_grid::AbstractVector{T} = SM.alpha_grid, 
+#     new_beta_grid::AbstractVector{T} = SM.beta_grid;
+#     # grid_only::Bool = false,
+#     kwds...) where T
+    
+    # itp = SM.interp_map
+    # map_type = grid_only ? Tuple{Float64, Float64} : T
+    # new_map = Matrix{map_type}(undef, length(new_alpha_grid), length(new_beta_grid))
+    # @inbounds for b in eachindex(new_beta_grid)#TODO: maybe manually vectorized
+    #     @simd for a in eachindex(new_alpha_grid)
+    #         # For each point in NEW frame, find where it came from in OLD frame
+    #         alpha_orig, beta_orig = pass_frame_to_frame(new_alpha_grid[a], 
+    #                                                     new_beta_grid[b], Gamma, Psi;
+    #                                                     inverse = true,
+    #                                                     kwds...)
+
+    #         # if grid_only
+    #         #     # return original angles
+    #         #     new_map[a,b] = (alpha_orig, beta_orig)
+    #         # else
+    #             # sample original pattern
+    #             new_map[a,b] = itp(alpha_orig, beta_orig)
+    #         # end
+    #     end
+    # end
 
     return new_map
 end
@@ -450,15 +535,22 @@ end
 """
     interpolate_sphere_map(spheremap::AbstractMatrix{T},
                            alphas::AbstractVector{T},
-                           betas::AbstractVector{T}) where T
+                           betas::AbstractVector{T};
+                           regular::Union{Bool,Nothing} = nothing) where T
 
-Yields the interpolation of the 'spheremap' matrix given the angles 'alphas' and
-'betas' in degrees.
+Yields the interpolator of the 'spheremap' matrix given the angles 'alphas' and
+'betas' in degrees. The 'alphas' direction is closed (360deg appended, wrapping
+the first row) so the sphere is periodic in co-azimuth.
+
+If the grids are regularly spaced, a fast scaled `BSpline(Linear())`
+interpolator is used; otherwise a `Gridded(Linear())` interpolator handles the
+non-uniform spacing. Regularity is auto-detected unless `regular` is given. 
 
 """
-function interpolate_sphere_map(spheremap::AbstractMatrix{T},#TODO: adapt to non-regular grids
+function interpolate_sphere_map(spheremap::AbstractMatrix{T},
     alphas::AbstractVector{T},
-    betas::AbstractVector{T}) where T
+    betas::AbstractVector{T};
+    regular_grid::Union{Bool,Nothing} = nothing) where T
     
     # close the sphere in alpha direction
     if !(T(360.) in alphas)
@@ -466,13 +558,21 @@ function interpolate_sphere_map(spheremap::AbstractMatrix{T},#TODO: adapt to non
         spheremap = vcat(spheremap, spheremap[1,:]')
     end
 
-    return interpolate((alphas, betas), spheremap, (Gridded(Linear()),Gridded(Linear())))
-    ############################TODO: constrain to regular grids
-    # alphas = range(alphas[1], alphas[end], length = length(alphas))
-    # betas = range(betas[1], betas[end], length = length(betas))
-    # itp = interpolate(spheremap, BSpline(Linear()))
-    # return scale(itp, alphas, betas)
+    is_reg = isnothing(regular_grid) ? (_is_regular(alphas) && _is_regular(betas)) : 
+                                       regular_grid
+
+    if is_reg
+        # reconstruct exact ranges so `scale` is happy and lookups are fast
+        alphas_r = range(first(alphas), last(alphas), length=length(alphas))
+        betas_r = range(first(betas), last(betas), length=length(betas))
+        itp = interpolate(spheremap, BSpline(Linear()))
+        return scale(itp, alphas_r, betas_r)
+    else
+        return interpolate((alphas, betas), spheremap, (Gridded(Linear()),
+                                                        Gridded(Linear())))
+    end
 end
+
 
 
 """

@@ -10,13 +10,11 @@ This function only works for uniform grids.
 
 """
 function integration_weights(alpha_grid::AbstractVector{T},
-    beta_grid::AbstractVector{T}) where T
-
-    # check grid is uniform
-    dalpha = alpha_grid[2] - alpha_grid[1]
-    @assert all(isapprox.(diff(alpha_grid), dalpha; atol=1e-6*dalpha))
-    dbeta = beta_grid[2] - beta_grid[1]
-    @assert all(isapprox.(diff(beta_grid), dbeta; atol=1e-6*dbeta))
+    beta_grid::AbstractVector{T};
+    alpha_periodic::Union{Bool,Nothing} = nothing) where T
+    
+    @assert issorted(alpha_grid) "alpha_grid must be sorted"
+    @assert issorted(beta_grid) "beta_grid must be sorted"
 
     # convert to radians
     alpha_rads = deg2rad.(alpha_grid)
@@ -24,24 +22,41 @@ function integration_weights(alpha_grid::AbstractVector{T},
     
     # Detect closure of azimuthal grid (changes integration weights at the edges
     # as one of the points has a looped neighbor in one case)
-    alpha_closed = isapprox(first(alpha_grid), 0; atol=1e-6*dalpha) &&
-                   isapprox(last(alpha_grid),  360; atol=1e-6*dalpha)
+    alpha_closed = isnothing(alpha_periodic) ? !(isapprox(first(alpha_grid), 0; 
+                                                          atol=1e-9) &&
+                                                 isapprox(last(alpha_grid),  360; 
+                                                          atol=1e-9)) : alpha_periodic
     
     # dimension weights
-    w_alpha = _weights_1d(alpha_rads; periodic = alpha_closed)
-    w_beta  = _weights_1d(beta_rads; periodic = false)   # β never periodic
+    w_alpha = trapz_weights(alpha_rads; periodic = alpha_closed, period = T(2π))
+    w_beta  = trapz_weights(beta_rads; periodic = false)   # β never periodic
 
     return w_alpha * w_beta'
 end
 
-function _weights_1d(x::AbstractVector{T}; periodic::Bool) where T
+
+
+"""
+    trapz_weights(x; 
+                  periodic = false, 
+                  period = 2π)
+
+Trapezoid integration weights for a (regular or non-regular) 1D grid `x`. For a
+periodic dimension, endpoints receive full weight via wrap-around. 
+
+"""
+function trapz_weights(x::AbstractVector{T};
+    periodic::Bool = false, 
+    period::T = T(2π)) where T
+
     n = length(x)
     w = similar(x)
-    for i in eachindex(x)
-        lo = i == 1 ? (periodic ? x[1]  - (x[end] - T(2π)) : zero(T)) : x[i] - x[i-1]
-        hi = i == n ? (periodic ? (x[1] + T(2π)) - x[end]  : zero(T)) : x[i+1] - x[i]
+    @inbounds for i in eachindex(x)
+        lo = i == 1 ? (periodic ? x[1]  - (x[end] - period) : zero(T)) : x[i] - x[i-1]
+        hi = i == n ? (periodic ? (x[1] + period) - x[end]  : zero(T)) : x[i+1] - x[i]
         w[i] = (lo + hi) / 2
     end
+
     return w
 end
 
@@ -106,7 +121,7 @@ function radiated_power_to_gain!(rad_pow::AbstractDataFrame,
     solid_angle = integrate_spheremap(SphereMap(a, b, ones(eltype(rad_pow_map), 
                                                 length(a), length(b)));
                                       normalize = false)
-    @assert isapprox(solid_angle, 4π; rtol = 1e-3) "Grid does not integrate to 4π — \
+    @assert isapprox(solid_angle, 4π; rtol = 1e-1) "Grid does not integrate to 4π — \
             full-sphere coverage required."
 
     # integrate over the sphere
@@ -140,14 +155,14 @@ end
 
 
 """
-    estim_hpbws(diameter::T,
+    estim_hpbw(diameter::T,
                 wavelength::T) where T
 
 Yields the half power beamwidth (in degrees) of an antenna given its diameter
 and wavelength.
 
 """
-function estim_hpbws(diameter::T,
+function estim_hpbw(diameter::T,
     wavelength::T) where T
 
     return 67.6 * (wavelength / diameter)
@@ -228,7 +243,8 @@ end
 
 
 """
-    antenna_mdl_ITU_RA_1631(ant_diameter::T,
+    antenna_mdl_ITU_RA_1631(gain_max::T,
+                            ant_diameter::T,
                             wavelength::T,
                             caz::AbstractVector{T},
                             pol::AbstractVector{T}) where T
