@@ -76,7 +76,7 @@ function estim_casA_flux(center_freq::T;
         c, var_c = -.023, .001^2
     elseif 300e6 < center_freq
         if center_freq > 31e9
-            @warn "the model is not valid for frequencies above 31GHz"
+            @warn "the model is not valid for frequencies above 31GHz" maxlog=1
         end
         a, var_a = 5.880, .025^2
         b, var_b = -0.792, .007^2

@@ -10,6 +10,8 @@ function model_observ_psd!(obs::Observation{T},
     ant_traj = obs.antenna_traj
     # get time samples of observation
     time_samps = ant_traj.times
+    # time resolution of observation
+    time_res = minimum(diff(time_samps))
     # get instrument used for observation
     instru = obs.instrument
     # get antenna of instrument
@@ -49,21 +51,22 @@ function model_observ_psd!(obs::Observation{T},
             t_samp = time_samps[t]
             ant_coords = ant_traj.traj[t,:]
             # list of sats visible at time t_samp
-            sats_names_at_t = get_sats_names_at_time(co, t_samp)
+            sats_names_at_t = get_sats_names_at_time(co, t_samp; time_res=time_res)
             for s_name in sats_names_at_t
                 # satellite
                 sat = get_sat(co, s_name)
                 # coordinates of sat at time t_samp in topocentric frame
-                sat_coord = get_sat_traj(sat)(t_samp)[1]
+                sat_coord = get_sat_traj(sat)(t_samp-time_res, t_samp+time_res)[1]#(t_samp)[1]#FIXME:
                 # satellite instrument
                 sat_instru = sat.instrument
                 # satellite EIRP_density at time t_samp
-                sat_EIRP_den = get_sat_EIRP_density(sat, t_samp) ./ k_boltz
+                sat_EIRP_den = get_sat_EIRP_density(sat, t_samp; time_res=time_res) ./ 
+                               k_boltz
                 # loop over antenna positions
                 for c_ind in eachindex(ant_coords)
                     ant_c = ant_coords[c_ind]
                     # link budget
-                    l = lnk_bdgt(sat_coord, sat_instru, ant_c, ant; 
+                    l = lnk_bdgt(sat_coord, sat_instru, ant_c, instru; 
                                  pre_load_rot_mat=rot_mats[t,c_ind])
                     
                     # update satellite contribution
