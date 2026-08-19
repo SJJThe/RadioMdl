@@ -46,7 +46,6 @@ end
                              tel_pointing_coord::SphereCoord{T},
                              tel_instru::Instrument{T};
                              pre_load_rot_mat::Union{Matrix,Nothing} = nothing,
-                             simple_approx::Bool = false,
                              beam_avoid_angle::T = 0.0,
                              turn_off::Bool = false) where T
 
@@ -58,19 +57,16 @@ distance between them and the frequency of observation.
 It is possible to give a pre-computed rotation matrix to transform from
 topocentric frame to telescope's antenna frame.
 
-If 'simple_approx' is true, the satellite coordinates are approximated in the
-telescope frame by negating the azimuthal angle and keeping the polar angle
-unchanged. 
+The satellite coordinates are transformed from the topocentric frame to the
+telescope's antenna frame by passing via an intermediate Earth-Centered
+Earth-Fixed (ECEF) frame. 
 
-If it is 'false', the satellite coordinates are transformed from the
-topocentric frame to the telescope's antenna frame by passing via an
-intermediate Earth-Centered Earth-Fixed (ECEF) frame.
-
-If 'beam_avoid_angle' is greater than 0, the function accounts for the effect of
-beam avoidance by the satellite. If the satellite boresight is closer than
-'beam_avoid_angle' to the telescope pointing direction, the satellite gain is
-reduced by "steering" away the satellite boresight of 45 degrees. If 'turn_off'
-is true, the satellite gain is set to zero instead of being steered away.
+If 'beam_avoid_angle' is greater than 0, the function accounts for beam
+avoidance strategies performed by the satellite. If `turn_off` is `true`, if the
+satellite is passing close to the telescope pointing direction, its gain is set
+to zero as it turns off. If it is `false`, if the satellite boresight is closer
+than 'beam_avoid_angle' to the telescope pointing direction, the satellite gain
+is reduced by "steering" away the satellite boresight of 45 degrees.
 
 """
 function classic_gain_link_budget(sat_coord::SphereCoord{T},
@@ -78,7 +74,6 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
     tel_pointing_coord::SphereCoord{T},
     tel_instru::Instrument{T};
     pre_load_rot_mat::Union{Matrix,Nothing} = nothing,
-    simple_approx::Bool = false,
     beam_avoid_angle::T = 0.0,
     turn_off::Bool = false) where T
 
@@ -94,46 +89,37 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
 
     # telescope gain
     gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel)
-
-    # coordinate of antenna from topocentric frame to satellite frame
-    if simple_approx # if sat is close to zenith
-        tel_coord_in_sat = SphereCoord(-tel_pointing_coord.alpha, 
-                                       tel_pointing_coord.beta, sat_coord.r)
-        R_ned = nothing
-        R_enu = nothing
-    else
-        isnothing(tel_instru.coords) && error("tel_instru.coords (Dict with :lat, :lon, \
-                                               :alt) is required when simple_approx is \
-                                               false.")
-        (tel_coord_in_sat, R_ned_s, 
-         R_nwz_t) = tel_dir_in_sat_frame(sat_coord, tel_instru.coords[:lat],
-                                         tel_instru.coords[:lon], 
-                                         tel_instru.coords[:alt])
-    end
-
+    
+    isnothing(tel_instru.coords) && error("tel_instru.coords (Dict with :lat, :lon, \
+                                           :alt) is required when simple_approx is \
+                                           false.")
+    (tel_coord_in_sat, R_ned_s, 
+     R_nwz_t) = tel_dir_in_sat_frame(sat_coord, tel_instru.coords[:lat],
+                                     tel_instru.coords[:lon], 
+                                     tel_instru.coords[:alt])
+    
     # beam avoidance effect
     if beam_avoid_angle > zero(T)
-        # get boresight pointing of satellite antenna
-        sat_beam_alpha, sat_beam_beta = get_boresight_gain(sat_instru.antenna)[2:3]
-        
-        # transform satellite beam coords in topocentric frame
-        if simple_approx
-            sat_beam_coord_topo = SphereCoord(-sat_beam_alpha, sat_beam_beta, 1.)
-        else
-            # boresight (antenna frame, X=North,Y=East,Z=Nadir) → ECEF → topo
-            v_ned  = spher_to_cart_coord(sat_beam_alpha, sat_beam_beta, 1.0)
-            v_ecef = R_ned_s * v_ned
-            v_t  = R_nwz_t' * v_ecef
-            alpha_b, beta_b = cart_to_sphe_coord(v_t[1], v_t[2], v_t[3])[1:2]
-            sat_beam_coord_topo = SphereCoord(alpha_b, beta_b, 1.0)
-        end
-
-        # angular distance between sat boresight and telescope pointing are
-        # closer than beam_avoid_angle
-        if angular_separation(sat_beam_coord_topo, tel_pointing_coord) < beam_avoid_angle
-            if turn_off
+        if turn_off
+            ang_sep = angular_separation(sat_coord, tel_pointing_coord)
+            if ang_sep < beam_avoid_angle
                 return zeros(T, length(freq_bins))
-            else
+            end
+        else
+            # get boresight pointing of satellite antenna
+            sat_beam_alpha, sat_beam_beta = get_boresight_gain(sat_instru.antenna)[2:3]
+            
+            # boresight (antenna frame, X=North,Y=East,Z=Nadir) → ECEF → topo
+            v_ned  = spher_to_cart_coord(sat_beam_alpha, sat_beam_beta, one(T))
+            v_ecef = R_ned_s * v_ned
+            v_t  = -R_nwz_t' * v_ecef
+            alpha_b, beta_b = cart_to_sphe_coord(v_t[1], v_t[2], v_t[3])[1:2]
+            sat_beam_coord_topo = SphereCoord(mod(-alpha_b, T(360)), beta_b, one(T))
+            
+            # angular distance between sat boresight and telescope pointing are
+            # closer than beam_avoid_angle
+            ang_sep = angular_separation(sat_beam_coord_topo, tel_pointing_coord)
+            if ang_sep < beam_avoid_angle
                 tel_coord_in_sat = SphereCoord(sat_beam_alpha,
                                                mod(sat_beam_beta + T(45), T(180)),
                                                sat_coord.r)
