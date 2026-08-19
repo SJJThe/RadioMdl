@@ -366,6 +366,36 @@ println("All Pattern Transformation Tests Completed!")
 println("="^60)
 
 
+@testset "pass_frame_to_frame: point and map agree" begin
+    ag = collect(0.:2.:358.); bg = collect(0.:2.:180.)
+    a0, b0 = 40.0, 70.0                       # asymmetric feature
+    bump(a,b) = exp(-(acosd(clamp(spher_to_cart_coord(a,b,1.)'*
+                                  spher_to_cart_coord(a0,b0,1.), -1, 1))/6.)^2)
+    SM = SphereMap(ag, bg, [bump(a,b) for a in ag, b in bg])
+    G, P = 130.0, 55.0
+
+    # where the SCALAR transform says the feature lands
+    as, bs = pass_frame_to_frame(a0, b0, G, P)
+
+    # where the MAP version actually puts it
+    M = pass_frame_to_frame(SM, G, P, ag, bg)
+    k = argmax(M)
+    @test isapprox(ag[k[1]], as; atol = 2.0)
+    @test isapprox(bg[k[2]], bs; atol = 2.0)
+
+    # boresight of the new frame must land at beta = 0
+    @test argmax(pass_frame_to_frame(SM, a0, b0, ag, bg))[2] == 1
+end
+
+@testset "rotate_to moves content TO the target" begin
+    ag = collect(0.:2.:358.); bg = collect(0.:2.:180.)
+    SM = SphereMap(ag, bg, [exp(-(b/8.)^2) for a in ag, b in bg])  # bump at pole
+    G, P = 130.0, 55.0
+    k = argmax(rotate_to(SM, G, P, ag, bg))
+    @test isapprox(ag[k[1]], G; atol = 2.0)
+    @test isapprox(bg[k[2]], P; atol = 2.0)
+end
+
 #=
 ## Realistic pattern tests
 # Load antenna pattern
