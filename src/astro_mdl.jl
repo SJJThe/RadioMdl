@@ -152,7 +152,7 @@ function ground_model(alpha_grid::AbstractVector{T},
     beta_grid::AbstractVector{T},
     T_ground::AbstractMatrix{T}) where T
 
-    @assert size(T_ground) == (length(beta_grid), length(alpha_grid))
+    @assert size(T_ground) == (length(alpha_grid), length(beta_grid))
 
     return SphereMap(alpha_grid, beta_grid, T_ground)
 end
@@ -280,4 +280,33 @@ function atmosphere_model(T_eff::T,
     beta_grid = collect(0.:1.:180.)
 
     return atmosphere_model(alpha_grid, beta_grid, T_eff, zenith_opacity, T_bkg)
+end
+
+
+
+"""
+    sky_grid(nb_elevation_rings::Int = 30)
+
+Defines a sky grid as detailed in ITU-R S.1586.
+
+"""
+function sky_grid(nb_elevation_rings::Int = 30)
+    
+    # grid polar resolution in degrees
+    pol_res = Float64(div(90, nb_elevation_rings))
+    
+    # pol-caz cells boundaries
+    pol_rings = [(pol_res * (p - 1), pol_res * p) for p in 1:nb_elevation_rings]
+    sky_cells = DataFrame(pol_min=Float64[], pol_max=Float64[], caz_min=Float64[],
+                          caz_max=Float64[])
+    for i in eachindex(pol_rings)
+        p_r = pol_rings[i]
+        nb_caz_cells_at_pol = Int(div(360, pol_res/cosd(90 - (p_r[1]+pol_res/2))))
+        caz_grid = range(0, 360.; length=nb_caz_cells_at_pol+1)
+        for a in 1:(length(caz_grid)-1)
+            push!(sky_cells, (p_r[1], p_r[2], caz_grid[a], caz_grid[a+1]))
+        end
+    end
+
+    return sky_cells
 end

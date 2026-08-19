@@ -62,7 +62,7 @@ end
 """
     adc_noise_temperature(Vfs::T,
                           nb_bits::Int,
-                          nb_freq_bins::Int;
+                          samp_rate::T;
                           instru_imp::T = impedance) where T
 
 Yields the noise temperature of the ADC for a given full-scale voltage 'Vfs',
@@ -74,13 +74,13 @@ dependent noise temperature.
 """
 function adc_noise_temperature(Vfs::T,#Full scale ADC voltage
     nb_bits::Int,
-    nb_freq_bins::Int; # in FFT slice
+    samp_rate::T;
     instru_imp::T = impedance) where T
     
     # noise power of the ADC
     P_adc = Vfs^2 / (12*instru_imp) * 2^(-2. *nb_bits)
 
-    return power_to_temperature(P_adc, T(nb_freq_bins))
+    return power_to_temperature(P_adc, samp_rate)
 end
 
 

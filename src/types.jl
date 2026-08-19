@@ -241,9 +241,9 @@ end
 
 get_time_bounds(T::Trajectory) = (T.times[1], T.times[end])
 
-(T::Trajectory)(t0::DateTime, t1::DateTime) = T.traj[t0 .<= T.times .< t1,:]#FIXME:
+(T::Trajectory)(t0::DateTime, t1::DateTime) = T.traj[t0 .<= T.times .< t1,:]
 
-(T::Trajectory)(t0::DateTime) = T(t0, t0)
+(T::Trajectory)(t0::DateTime) = T.traj[t0 .== T.times,:]
 
 get_coords(T::Trajectory) = [T.traj[i].alpha for i in eachindex(T.times)], 
                             [T.traj[i].beta for i in eachindex(T.times)], 
@@ -580,26 +580,17 @@ function get_antenna_temperature(A::Antenna{T},
     # define sampling grids
     alpha_grid = A.gain_pat.alpha_grid
     beta_grid = A.gain_pat.beta_grid
+    
+    # compute integration weights
+    weights = integration_weights(alpha_grid, beta_grid)
 
     # apply SphereMap to Antenna
     g_T_b = A(T_b, point_coord; pre_load_rot_mat=pre_load_rot_mat)
 
-    return trapz((deg2rad.(alpha_grid), deg2rad.(beta_grid)), 
-                 g_T_b.spheremap .* sind.(beta_grid')) / (4*pi)
+    # return trapz((deg2rad.(alpha_grid), deg2rad.(beta_grid)), 
+    #              g_T_b.spheremap .* #=sin_beta_weights=#sind.(beta_grid)') / (4*pi)
+    return sum(g_T_b.spheremap .* #=sin_beta_weights=#sind.(beta_grid)' .* weights) / (4*pi)
 end
-
-# function get_antenna_temperature(A::Antenna{T},
-#     T_bs::DimArray{SphereMap{T}},
-#     point_coord::SphereCoord;
-#     kwds...) where T
-
-#     T_a_bs = similar(T_bs)
-#     for i in eachindex(T_bs)
-#         T_a_bs[i] = get_antenna_temperature(A, T_bs[i], point_coord; kwds...)
-#     end
-
-#     return DimArray(T_a_bs, dims(T_bs))
-# end
 
 function get_antenna_temperature(A::Antenna{T}, 
     T_b::T) where T
@@ -614,7 +605,10 @@ function get_antenna_temperature(A::Antenna{T},
 
     return T_b .* A.rad_eff
 end
-
+#FIXME: inconsistent with  get_antenna_temperature(A::Antenna{T}, 
+    # T_b::SphereMap{T},
+    # point_coord::SphereCoord)
+#check with constant sphere (SphereMap([0.], [0., 90., 180.], 300 .* ones(1,3)))
 function get_antenna_temperature(A::Antenna{T},
     T_b::SphereMap{T},
     ant_traj::Trajectory;
@@ -628,8 +622,7 @@ function get_antenna_temperature(A::Antenna{T},
     weights = integration_weights(alpha_grid, beta_grid)
 
     # scale gain by integral factor
-    # scaled_gain = A.gain_pat.spheremap .* sind.(beta_grid') ./ (4π)
-    scaled_gain = A.gain_pat.spheremap .* sind.(beta_grid') ./ (4π) .* weights
+    scaled_gain = (A.gain_pat.spheremap .* #=sin_beta_weights=#sind.(beta_grid)') ./ (4π) .* weights
     
     # nb of coords per time stamps
     nb_coords = size(ant_traj.traj,2)
@@ -644,10 +637,6 @@ function get_antenna_temperature(A::Antenna{T},
                 must have same size than ant_traj.traj."
     end
 
-    # workspace
-    # wks = [Matrix{T}(undef, length(alpha_grid), length(beta_grid)) 
-    #        for _ in 1:nthreads()]
-
     T_As = DimArray(zeros(T, length(ant_traj.times), nb_coords),
                     (Dim{:times}(ant_traj.times),Dim{:traj_idx}(1:nb_coords)))
     @threads :dynamic for c in eachindex(unique_coords)
@@ -660,12 +649,6 @@ function get_antenna_temperature(A::Antenna{T},
         T_b_in_ant = pass_frame_to_frame(T_b, ant_coord, alpha_grid, beta_grid;
                                        pre_load_rot_mat=pre_load_rot_mat[t_c[1],tr_c[1]])
 
-        # combine antenna gain
-        # wks[threadid()] = scaled_gain .* T_b_in_ant.spheremap
-
-        # integrate over sphere
-        # T_As[times=t_c,traj_idx=tr_c] .= trapz((deg2rad.(alpha_grid), 
-        #                                         deg2rad.(beta_grid)), wks[threadid()])
         v = dot(scaled_gain, T_b_in_ant)
         @inbounds for k in eachindex(t_c)
             T_As[times=t_c[k],traj_idx=tr_c[k]] = v
@@ -703,8 +686,7 @@ function get_antenna_temperature(A::Antenna{T},
     weights = integration_weights(alpha_grid, beta_grid)
 
     # scale gain by integral factor
-    # scaled_gain = A.gain_pat.spheremap .* sind.(beta_grid') ./ (4π)
-    scaled_gain = A.gain_pat.spheremap .* sind.(beta_grid') ./ (4π) .* weights
+    scaled_gain = (A.gain_pat.spheremap .* #=sin_beta_weights=#sind.(beta_grid)') ./ (4π) .* weights
     
     # nb of coords per time stamps
     nb_coords = size(ant_traj.traj,2)
@@ -1350,12 +1332,12 @@ function MovingExtendSrcTemp(temp::SphereMap{T},
             push!(temp_vec, temp_vec[end])
         else
             push!(temp_vec, SphereMap(alpha_grid, beta_grid, 
-                                      pass_frame_to_frame(temp, moving_coords)))
+                                      rotate_to(temp, moving_coords)))
         end
         last_coord = moving_coords
     end
 
-    return DimArray(temp_vec, (Dim{:times}(traj.times)))
+    return MovingExtendSrcTemp(DimArray(temp_vec, (Dim{:times}(traj.times))), traj)
 end
 
 function get_antenna_temperature(A::Antenna{T},
@@ -1446,7 +1428,7 @@ end
 
 
 """
-    Satellite(name::String,
+    Satellite(sat_name::String,
               instrument::Instrument{T},
               EIRP_density::Union{T,DimArray{T}},
               traj::Trajectory) where T
@@ -1469,12 +1451,12 @@ Use 'get_sat_EIRP_density' to get the EIRP density at a given time (see
 
 """
 struct Satellite{T<:AbstractFloat}
-    name::String # name of satellite
+    sat_name::String # name of satellite
     instrument::Instrument{T} # instrument of satellite
     EIRP_density::Union{T,DimArray{T}} # effective isotropic radiated power in W/Hz
     sat_traj::Trajectory # trajectory of satellite
 
-    function Satellite(name::String,
+    function Satellite(sat_name::String,
         instrument::Instrument{T},
         EIRP_density::Union{T,DimArray{T}},
         sat_traj::Trajectory) where T
@@ -1494,15 +1476,15 @@ struct Satellite{T<:AbstractFloat}
             end
         end 
 
-        @assert get_boresight_gain(instrument.antenna)[1] == 1.0 "the antenna gain \
-                pattern of the satellite must be normalized such that the boresight \
-                gain is 1.0"
+        @assert isapprox(get_boresight_gain(instrument.antenna)[1], 1.0; 
+                         rtol=1e-3) "the antenna gain pattern of the satellite must be \
+                normalized such that the boresight gain is 1.0"
 
         @assert instrument.receiver.gain_amps == 1. "the receiver gain of the satellite \
                                                      must be 1.0, as the EIRP density is \
                                                      already defined in W/Hz"
 
-        return new{T}(name, instrument, EIRP_density, sat_traj)
+        return new{T}(sat_name, instrument, EIRP_density, sat_traj)
     end
 end
 
@@ -1526,8 +1508,12 @@ function get_sat_EIRP_density(S::Satellite,
     
     gain_sat = S.instrument.receiver.gain_amps .* S.instrument.receiver.freq_resp
 
-    if typeof(S.EIRP_density) <: DimArray && :times in name.(dims(S.EIRP_density))
-        return gain_sat .* S.EIRP_density[times=(t - time_res) .. (t + time_res)]
+    if typeof(S.EIRP_density) <: DimArray && :times in name.(dims(S.EIRP_density)) 
+        if isnothing(time_res)
+            return gain_sat .* S.EIRP_density[times=Near(t)]
+        else
+            return gain_sat .* S.EIRP_density[times=(t - time_res) .. (t + time_res)]
+        end
     else
         return gain_sat .* S.EIRP_density
     end
@@ -1574,6 +1560,7 @@ function form_satellites_list(sats_info::AbstractDataFrame,
     sat_eirp_density_func::F,
     start_time::DateTime,
     stop_time::DateTime;
+    rotate_beam::Bool = false,
     sat_id_tag::Symbol = :sat,
     time_tag::Symbol = :times,
     kwds...) where {T,F<:Function}
@@ -1581,16 +1568,18 @@ function form_satellites_list(sats_info::AbstractDataFrame,
     @assert sat_id_tag in propertynames(sats_info) "sat_id_tag must be a column of \
             'sats_info"
 
-    @assert hasmethod(sat_eirp_density_func, (Trajectory,)) "sat_eirp must be a function \
-            of signature (Trajectory) -> Union{T,DimArray{T}}"
-    
+    @assert hasmethod(sat_eirp_density_func, (Trajectory,)) "sat_eirp must be a \
+            function of signature (Trajectory) -> Union{T,DimArray{T}}"
+
     # filter by time window
     sats_info = subset(sats_info, time_tag => t -> start_time .<= t .<= stop_time; 
                        view=true)
+    sats_ant = sats_instrument.antenna
     
     list_sats = unique(sats_info, sat_id_tag)[:,sat_id_tag]
-    sats = Satellite{T}[]
-    for s in list_sats
+    sats = Vector{Satellite{T}}(undef, length(list_sats))
+    @threads :dynamic for i in eachindex(list_sats)
+        s = list_sats[i]
         # isolate satellite
         sat_info = subset(sats_info, sat_id_tag => n -> n .== s; view=true)
 
@@ -1599,9 +1588,21 @@ function form_satellites_list(sats_info::AbstractDataFrame,
 
         # form satellite EIRP density (can depend on time and/or elevation, etc.)
         sat_eirp_density = sat_eirp_density_func(sat_traj)
-        
+
+        # beamform the satellite antenna pattern
+        if rotate_beam#TODO: make this more complex
+            sat_pat = sats_ant.gain_pat
+            sat_map_rot = rotate_to(sat_pat, 0., rand(sat_pat.beta_grid))
+            sat_gain_pat_rot = SphereMap(sat_pat.alpha_grid, sat_pat.beta_grid, sat_map_rot)
+            sat_ant_rot = Antenna(sats_ant.ant_diameter, sat_gain_pat_rot, 
+                                  sats_ant.ap_eff, sats_ant.rad_eff, 
+                                  sats_ant.valid_freqs, sats_ant.T_phy)
+            sats_instrument = Instrument(sat_ant_rot, sats_instrument.receiver, 
+                                         sats_instrument.coords)
+        end
+
         # create satellite
-        push!(sats, Satellite(s, sats_instrument, sat_eirp_density, sat_traj))
+        sats[i] = Satellite(s, sats_instrument, sat_eirp_density, sat_traj)
     end
 
     return sats
@@ -1723,9 +1724,9 @@ end
 #     #                      filt_funcs=filt_funcs)
 # end
 
-get_sat(C::Constellation, s::String) = C.sats[findfirst(sats -> sats.name .== s, C.sats)]
+get_sat(C::Constellation, s::String) = C.sats[findfirst(sats -> sats.sat_name .== s, C.sats)]
 
-get_sats_name(C::Constellation) = [sat.name for sat in C.sats]
+get_sats_name(C::Constellation) = [sat.sat_name for sat in C.sats]
 
 
 """
@@ -1738,7 +1739,7 @@ Yields the trajectory of satellite 's' in constellation 'C'.
 function get_sat_traj(C::Constellation,
     s::String)
     
-    sat_index = findfirst(sats -> sats.name .== s, C.sats)
+    sat_index = findfirst(sats -> sats.sat_name .== s, C.sats)
 
     return get_sat_traj(C.sats[sat_index])
 end
@@ -1766,6 +1767,6 @@ function get_sats_names_at_time(C::Constellation,
                                           (get_sat_traj(sat).times .+ time_res)), C.sats)
     end
 
-    return [C.sats[i].name for i in sats_ind]
+    return [C.sats[i].sat_name for i in sats_ind]
 end
 

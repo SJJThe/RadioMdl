@@ -7,6 +7,7 @@ export AbstractBkg,
        add_coords,
        antenna_mdl_cst,
        antenna_mdl_ITU_RA_1631,
+       antenna_mdl_ITU_S_1528,
        antenna_mdl_ITU_SA_509_3,
        atmos_opacity_impact,
        atmosphere_model,
@@ -65,6 +66,8 @@ export AbstractBkg,
        SkyMdl,
        SphereCoord,
        SphereMap,
+       sats_close_to_pointing,
+       sky_grid,
        TiFreqArray,
        Trajectory,
        temperature_to_flux,
@@ -83,7 +86,8 @@ using Interpolations
 using InterpolationKernels
 using LinearInterpolators
 using SpecialFunctions
-using Trapz
+using Statistics
+# using Trapz
 using Base.Threads
 
 using LinearAlgebra: dot, BLAS
@@ -102,6 +106,7 @@ const impedance = 50
 include("io.jl")
 include("coord_frames.jl")
 using .CoordFrames
+import .CoordFrames: get_angle_grids
 include("antenna_pattern.jl")
 include("rx_mdl.jl")
 include("astro_mdl.jl")
