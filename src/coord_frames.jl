@@ -34,6 +34,7 @@ export add_coords,
        map_sphere_coords,
        pass_frame_to_frame,
        rot_mat,
+       rotate_to,
        SphereCoord,
        SphereMap,
        spher_to_cart_coord
@@ -108,7 +109,8 @@ end
 
 Returns the sum of two spherical coordinates '(α,β,r)' in the '(X,Y,Z)' frame.
 Note that the resulting spherical coordinates is not equivalent to a rotation of
-the original coordinates.
+the original coordinates. If `ranges` is true, the range of the first
+SphereCoord, `a`, is conserved, else the resulted structure has a range of one. 
 
 """
 function add_coords(a::SphereCoord{T},
@@ -117,9 +119,9 @@ function add_coords(a::SphereCoord{T},
     subtract_angles::Bool = false) where T
 
     if subtract_angles
-        return SphereCoord(a.alpha - b.alpha, a.beta - b.beta, ranges ? a.r + b.r : one(T))
+        return SphereCoord(a.alpha - b.alpha, a.beta - b.beta, ranges ? a.r : one(T))
     else
-        return SphereCoord(a.alpha + b.alpha, a.beta + b.beta, ranges ? a.r + b.r : one(T))
+        return SphereCoord(a.alpha + b.alpha, a.beta + b.beta, ranges ? a.r : one(T))
     end
 end
 
@@ -373,6 +375,57 @@ end
 
 
 """
+    resample_rotated(SM::SphereMap{T},
+                     Rp::AbstractMatrix,
+                     new_alpha_grid::AbstractVector{T},
+                     new_beta_grid::AbstractVector{T}) where T
+
+Resample `SM` onto (`new_alpha_grid`,`new_beta_grid`) using `Rp` as the
+pull-back matrix: destination cell (α,β) samples the source at `Rp * v(α,β)`.
+
+"""
+function resample_rotated(SM::SphereMap{T},
+    Rp::AbstractMatrix{T},
+    new_alpha_grid::AbstractVector{T},
+    new_beta_grid::AbstractVector{T}) where T
+
+    itp = SM.interp_map
+    Na, Nb = length(new_alpha_grid), length(new_beta_grid)
+
+    sinα = sind.(new_alpha_grid)
+    cosα = cosd.(new_alpha_grid)
+    sinβ = sind.(new_beta_grid)
+    cosβ = cosd.(new_beta_grid)
+
+    α_orig = Matrix{T}(undef, Na, Nb)
+    β_orig = Matrix{T}(undef, Na, Nb)
+
+    @inbounds for j in 1:Nb
+        for i in 1:Na
+            x = sinβ[j]*cosα[i] 
+            y = sinβ[j]*sinα[i]
+            z = cosβ[j]
+            
+            xr = Rp[1,1]*x + Rp[1,2]*y + Rp[1,3]*z
+            yr = Rp[2,1]*x + Rp[2,2]*y + Rp[2,3]*z
+            zr = Rp[3,1]*x + Rp[3,2]*y + Rp[3,3]*z
+            
+            α_orig[i,j] = mod(atan(yr, xr)*(180/π), T(360))
+            β_orig[i,j] = acos(clamp(zr, -one(T), one(T))) * (180/π)
+        end
+    end
+
+    new_map = Matrix{T}(undef, Na, Nb)
+    @inbounds for idx in eachindex(α_orig)
+        new_map[idx] = itp(α_orig[idx], β_orig[idx])
+    end
+
+    return new_map
+end
+
+
+
+"""
     pass_frame_to_frame(SM::SphereMap{T},
                         Gamma::Real,
                         Psi::Real,
@@ -399,79 +452,16 @@ Uses 'pass_frame_to_frame' on a 'SphereMap' given a 'SphereCoord' to define the
 orientation of the new frame.
 
 """
-function pass_frame_to_frame(SM::SphereMap{T},#FIXME: vectorized version
+function pass_frame_to_frame(SM::SphereMap{T},
     Gamma::Real,
     Psi::Real,
-    new_alpha_grid::AbstractVector{T} = SM.alpha_grid, 
+    new_alpha_grid::AbstractVector{T} = SM.alpha_grid,
     new_beta_grid::AbstractVector{T} = SM.beta_grid;
-    pre_load_rot_mat::Union{Nothing, Matrix{T}} = nothing,
-    inverse::Bool = false) where T
+    pre_load_rot_mat::Union{Nothing, Matrix{T}} = nothing) where T
 
-    # parameters
-    itp = SM.interp_map
-    Na, Nb = length(new_alpha_grid), length(new_beta_grid)
-
-    # rotation matrix for new frame
     R = isnothing(pre_load_rot_mat) ? rot_mat(Gamma, Psi) : pre_load_rot_mat
-    Rt = inverse ? R : R'
 
-    # Precompute trig once per axis (outer products give the full grid)
-    sinα = sind.(new_alpha_grid);  cosα = cosd.(new_alpha_grid)   # length Na
-    sinβ = sind.(new_beta_grid);   cosβ = cosd.(new_beta_grid)    # length Nb
-
-    # compute all source (α, β) for the destination grid
-    α_orig = Matrix{T}(undef, Na, Nb)
-    β_orig = Matrix{T}(undef, Na, Nb)
-    
-    @turbo for j in 1:Nb
-        for i in 1:Na
-            x = sinβ[j]*cosα[i]; y = sinβ[j]*sinα[i]; z = cosβ[j]
-            xr = Rt[1,1]*x + Rt[1,2]*y + Rt[1,3]*z
-            yr = Rt[2,1]*x + Rt[2,2]*y + Rt[2,3]*z
-            zr = Rt[3,1]*x + Rt[3,2]*y + Rt[3,3]*z
-            α_orig[i,j] = mod(atan(yr, xr)*(180/π), 360)
-            β_orig[i,j] = acos(clamp(zr,-1,1))*(180/π)
-        end
-    end
-
-    map_type = #=grid_only ? Tuple{Float64, Float64} : =#T
-    new_map = Matrix{map_type}(undef, length(new_alpha_grid), length(new_beta_grid))
-    @inbounds for idx in eachindex(α_orig)
-        new_map[idx] = itp(α_orig[idx], β_orig[idx])
-    end
-########################################################################################
-# end
-
-# function pass_frame_to_frame(SM::SphereMap{T},
-#     Gamma::Real,#FIXME:change name varaibles
-#     Psi::Real,#FIXME:change name varaibles
-#     new_alpha_grid::AbstractVector{T} = SM.alpha_grid, 
-#     new_beta_grid::AbstractVector{T} = SM.beta_grid;
-#     # grid_only::Bool = false,
-#     kwds...) where T
-    
-    # itp = SM.interp_map
-    # map_type = grid_only ? Tuple{Float64, Float64} : T
-    # new_map = Matrix{map_type}(undef, length(new_alpha_grid), length(new_beta_grid))
-    # @inbounds for b in eachindex(new_beta_grid)#TODO: maybe manually vectorized
-    #     @simd for a in eachindex(new_alpha_grid)
-    #         # For each point in NEW frame, find where it came from in OLD frame
-    #         alpha_orig, beta_orig = pass_frame_to_frame(new_alpha_grid[a], 
-    #                                                     new_beta_grid[b], Gamma, Psi;
-    #                                                     inverse = true,
-    #                                                     kwds...)
-
-    #         # if grid_only
-    #         #     # return original angles
-    #         #     new_map[a,b] = (alpha_orig, beta_orig)
-    #         # else
-    #             # sample original pattern
-    #             new_map[a,b] = itp(alpha_orig, beta_orig)
-    #         # end
-    #     end
-    # end
-
-    return new_map
+    return resample_rotated(SM, R, new_alpha_grid, new_beta_grid)
 end
 
 function  pass_frame_to_frame(SM::SphereMap{T},
@@ -493,6 +483,63 @@ function pass_frame_to_frame(SM::SphereMap{T},
     return pass_frame_to_frame(SM, spherecoord.alpha, spherecoord.beta, args...; kwds...)
 end
 
+
+
+"""
+    rotate_to(SM::SphereMap,
+              Gamma::Real,
+              Psi::Real,
+              new_alpha_grid::AbstractVector = SM.alpha_grid,
+              new_beta_grid::AbstractVector = SM.beta_grid;
+              pre_load_rot_mat::Union{Nothing, Matrix} = nothing)
+
+Physically moves the content of `SM` so that the former pole (beta=0) ends up at
+(`Gamma`, `Psi`). This is the opposite direction to
+[`pass_frame_to_frame`](@ref), which moves the content of `SM` to a new frame.
+
+'new_alpha_grid' and 'new_beta_grid' can be 'AbstractVector's or
+'AbstractRange's.
+
+---
+    rotate_to(SM::SphereMap,
+              coordsphere::SphereCoord,
+              args...;
+              kwds...)
+
+Uses 'rotate_to' on a 'SphereMap' given a 'SphereCoord' to define the
+orientation of the new frame. 
+
+"""
+function rotate_to(SM::SphereMap,
+    Gamma::Real,
+    Psi::Real,
+    new_alpha_grid::AbstractVector = SM.alpha_grid,
+    new_beta_grid::AbstractVector = SM.beta_grid;
+    pre_load_rot_mat::Union{Nothing, Matrix} = nothing)
+
+    R = isnothing(pre_load_rot_mat) ? rot_mat(Gamma, Psi) : pre_load_rot_mat
+
+    return resample_rotated(SM, transpose(R), new_alpha_grid, new_beta_grid)
+end
+
+function rotate_to(SM::SphereMap,
+    Gamma::Real,
+    Psi::Real,
+    new_alpha_grid::AbstractRange,
+    new_beta_grid::AbstractRange;
+    kwds...)
+
+    return rotate_to(SM, Gamma, Psi, collect(new_alpha_grid), collect(new_beta_grid); 
+                     kwds...)
+end
+
+function rotate_to(SM::SphereMap,
+    spherecoord::SphereCoord,
+    args...;
+    kwds...) 
+
+    return rotate_to(SM, spherecoord.alpha, spherecoord.beta, args...; kwds...)
+end
 
 
 """
@@ -681,9 +728,6 @@ The rotation matrix of passage to antenna frame can be pre-computed and given as
 an argument 'pre_load_rot_mat' to avoid redundant computations if many points
 are transformed with the same rotation angles.
 
-If 'inverse' is true, the rotation matrix is transposed to go from the new
-frame to the old frame instead.
-
 ---
     pass_frame_to_frame(spherecoord::SphereCoord,
                         new_spherecoord::SphereCoord;
@@ -692,12 +736,11 @@ frame to the old frame instead.
 Uses 'pass_frame_to_frame' on 'SphereCoord' structures.
 
 """
-function pass_frame_to_frame(alpha::Real,#TODO: vectorize
+function pass_frame_to_frame(alpha::Real,
     beta::Real,
     Gamma::Real,
     Psi::Real;
-    pre_load_rot_mat::Union{Matrix,Nothing} = nothing,
-    inverse::Bool = false)
+    pre_load_rot_mat::Union{Matrix,Nothing} = nothing)
 
     # rotation matrix for new frame
     R = isnothing(pre_load_rot_mat) ? rot_mat(Gamma, Psi) : pre_load_rot_mat
@@ -706,7 +749,7 @@ function pass_frame_to_frame(alpha::Real,#TODO: vectorize
     p_XYZ = spher_to_cart_coord(alpha, beta)
 
     # cartesian coord of point in (p,g,b)
-    obj_pgb = (inverse ? R : R') * p_XYZ
+    obj_pgb = R' * p_XYZ
 
     # spherical coord of point in (p,g,b)
     obj_pgb_sph = cart_to_sphe_coord(obj_pgb[1], obj_pgb[2], obj_pgb[3])
