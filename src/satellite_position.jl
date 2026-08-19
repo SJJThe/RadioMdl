@@ -18,6 +18,7 @@ export angular_separation,
        gcs_to_ecef,
        ned_to_ecef_rotation,
        nwz_to_ecef_rotation,
+       sats_close_to_pointing,
        tel_dir_in_sat_frame,
        url_celestrak,
        url_starlink_celestrak
@@ -406,6 +407,72 @@ end
 
 
 
+""" Index of the element of the sorted vector `ts` closest to `t`. """
+function nearest_idx(ts::AbstractVector, t)
+    i = searchsortedfirst(ts, t)
+    i == firstindex(ts) && return firstindex(ts)
+    i > lastindex(ts)   && return lastindex(ts)
+    return (t - ts[i-1]) <= (ts[i] - t) ? i - 1 : i
+end
+
+
+
+"""
+    sats_close_to_pointing(traj_sats::DataFrame, 
+                           ant_traj::Trajectory;
+                           angle_detect::Real = 5.)
+
+Select the satellites that are close to the pointing direction of the antenna.
+
+"""
+function sats_close_to_pointing(traj_sats::DataFrame, 
+    ant_times::AbstractVector{DateTime},
+    ant_traj::AbstractArray{T};
+    angle_detect::Real = 5.) where T
+
+    # antenna trajectory
+    time_res = minimum(diff(ant_times))
+    ant_az = mod.(360. .- getproperty.(ant_traj, :alpha), 360.)
+    ant_el = 90. .- getproperty.(ant_traj, :beta)
+
+    # align timestamps
+    idx = [nearest_idx(ant_times, t) for t in traj_sats.times]
+    keep = abs.(traj_sats.times .- ant_times[idx]) .<= (time_res / 2)
+
+    # select sats
+    df = traj_sats[keep,:]
+    df.i_ant = idx[keep]
+    sort!(df, [:sat, :times])
+
+    sats_close = DataFrame(sat = String[], beam = Int[], t_start = DateTime[], 
+                           t_stop = DateTime[], sep_min = Float64[], 
+                           t_closest = DateTime[], n = Int[])
+    for p in axes(ant_az, 2)
+        az_p, el_p = view(ant_az, :, p), view(ant_el, :, p)
+        sep = angular_separation.(df.azimuths, df.elevations, az_p[df.i_ant], 
+                                  el_p[df.i_ant])
+        rows = findall(<=(angle_detect), sep)
+        isempty(rows) && continue
+
+        hits = DataFrame(sat=df.sat[rows], times=df.times[rows], sep=sep[rows])
+        # a new window starts wherever the row index jumps, or the satellite changes
+        hits.win = cumsum([true; (diff(rows) .!= 1) .|
+                          (@view(hits.sat[2:end]) .!= @view(hits.sat[1:end-1]))])
+
+        w = combine(groupby(hits, [:sat, :win]), :times => first => :t_start,
+                    :times => last => :t_stop, :sep => minimum => :sep_min,
+                    [:times, :sep] => ((t, s) -> t[argmin(s)]) => :t_closest,
+                    nrow => :n)
+
+        w.beam .= p
+        append!(sats_close, select(w, Not(:win)))
+    end
+
+    return sats_close
+end
+
+
+
 #### CHANGE SATELLITE FRAME ####
 
 
@@ -468,19 +535,34 @@ end
 
 
 """
+    angular_separation()
+
+Angular separation (deg) between two (az, el) directions, in degrees.
+
+---
     angular_separation(a::SphereCoord,
                         b::SphereCoord)
 
 Great-circle angular separation (degrees) between two SphereCoords.
 
 """
-function angular_separation(a::SphereCoord,
-    b::SphereCoord)
+@inline function angular_separation(az1::T,
+    el1::T,
+    az2::T,
+    el2::T) where T<:Real
     
-    va = spher_to_cart_coord(a.alpha, a.beta, 1.0)
-    vb = spher_to_cart_coord(b.alpha, b.beta, 1.0)
+    c = sind(el1) * sind(el2) + cosd(el1) * cosd(el2) * cosd(az1 - az2)
+
+    return acosd(clamp(c, -one(c), one(c)))
+end
+
+function angular_separation(a::SphereCoord{T},
+    b::SphereCoord{T}) where T
     
-    return acosd(clamp(dot(va, vb), -1, 1))
+    va = spher_to_cart_coord(a.alpha, a.beta, one(T))
+    vb = spher_to_cart_coord(b.alpha, b.beta, one(T))
+    
+    return acosd(clamp(dot(va, vb), -one(T), one(T)))
 end
 
 
