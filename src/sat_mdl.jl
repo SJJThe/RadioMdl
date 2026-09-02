@@ -152,6 +152,7 @@ function epfd_link_budget(sat_coord::SphereCoord{T},
     sat_instru::Instrument{T},
     tel_pointing_coord::SphereCoord{T},
     tel_instru::Instrument{T};
+    tel_max_gain::T = get_boresight_gain(tel_instru.antenna)[1],
     pre_load_rot_mat::Union{Matrix,Nothing} = nothing) where T
     
     # coordinate of sat in telescope frame
@@ -162,7 +163,7 @@ function epfd_link_budget(sat_coord::SphereCoord{T},
     tel_antenna = tel_instru.antenna
 
     # telescope gain
-    gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel) / get_boresight_gain(tel_antenna)[1]
+    gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel) / tel_max_gain
     
     return gain_tel / (4π * sat_coord.r^2)
 end
