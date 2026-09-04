@@ -20,7 +20,7 @@ with 'p' the point of spherical coordinates (α,β) in degrees, or alternatively
 of cartesian coordinates (x,y,z).
 
 """
-module CoordFrames#FIXME: rename file to same name as module
+module CoordFrames
 
 using DataFrames
 using Interpolations

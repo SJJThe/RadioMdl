@@ -47,8 +47,8 @@ export AbstractBkg,
        ground_model,
        Instrument,
        instrument_psd_stat,
-       integrate_spheremap,#FIXME: move to coord_frames.jl
-       integration_weights,#FIXME: move to coord_frames.jl
+       integrate_spheremap,
+       integration_weights,
        k_boltz,
        MovingExtendSrcTemp,
        model_observ_psd!,
@@ -105,14 +105,14 @@ const impedance = 50
 
 
 include("io.jl")
-include("coord_frames.jl")
+include("CoordFrames.jl")
 using .CoordFrames
 import .CoordFrames: get_angle_grids
 include("antenna_pattern.jl")
 include("rx_mdl.jl")
 include("astro_mdl.jl")
 include("types.jl")
-include("satellite_position.jl")
+include("SatPos.jl")
 using .SatPos
 include("sat_mdl.jl")
 include("obs_mdl.jl")
