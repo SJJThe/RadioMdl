@@ -458,7 +458,7 @@ function pass_frame_to_frame(SM::SphereMap{T},
     Psi::Real,
     new_alpha_grid::AbstractVector{T} = SM.alpha_grid,
     new_beta_grid::AbstractVector{T} = SM.beta_grid;
-    pre_load_rot_mat::Union{Nothing, Matrix{T}} = nothing) where T
+    pre_load_rot_mat::Union{Nothing, AbstractMatrix} = nothing) where T
 
     R = as_rot_mat(pre_load_rot_mat, Gamma, Psi)
 

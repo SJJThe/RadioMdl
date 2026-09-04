@@ -75,10 +75,11 @@ function model_observ_psd!(obs::Observation{T},
                                  pre_load_rot_mat=rot_mats[t,c_ind])
                     # update satellite contribution
                     # obs.result[times=t,traj_idx=c_ind] .+= l .* sat_EIRP_den
-                    sat_EIRP_den .*= l
-                    for f in axes(res,2)
-                        res[t,f,c_ind] += sat_EIRP_den[f]
-                    end
+                    # sat_EIRP_den .*= l
+                    # for f in axes(res,2)
+                    #     res[t,f,c_ind] += l .* sat_EIRP_den[f]
+                    # end
+                    res[t,:,c_ind] .+= l .* sat_EIRP_den
                 end
             end
         end

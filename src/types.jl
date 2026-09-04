@@ -677,7 +677,7 @@ end
 function get_antenna_temperature(A::Antenna{T},
     T_b::SphereMap{T},
     ant_traj::Trajectory;
-    pre_load_rot_mat::Union{<:AbstractArray{Matrix{T}},Nothing} = nothing) where T
+    pre_load_rot_mat::Union{AbstractArray{<:AbstractMatrix},Nothing} = nothing) where T
 
     # define sampling grids
     alpha_grid = A.gain_pat.alpha_grid
@@ -729,7 +729,7 @@ end
     get_antenna_temperature(A::Antenna{T},
         T_b::DimArray{SphereMap{T}},
         ant_traj::Trajectory;
-        pre_load_rot_mat::Union{<:AbstractArray{Matrix{T}},Nothing} = nothing) where T
+        pre_load_rot_mat::Union{AbstractArray{<:AbstractMatrix},Nothing} = nothing) where T
 
 Get the antenna temperature in the antenna frame for a DimArray of SphereMaps.
 The antenna trajectory must begin after or at the same time as the first SphereMap
@@ -739,7 +739,7 @@ in T_b, as a model needs to be defined for each antenna position.
 function get_antenna_temperature(A::Antenna{T},
     T_b::DimArray{SphereMap{T}},
     ant_traj::Trajectory;
-    pre_load_rot_mat::Union{<:AbstractArray{Matrix{T}},Nothing} = nothing) where T
+    pre_load_rot_mat::Union{AbstractArray{<:AbstractMatrix},Nothing} = nothing) where T
 
     is_TiFreqArray(T_b; strict=true)
 
@@ -1295,7 +1295,7 @@ end
 function get_antenna_temperature(A::Antenna{T},
     S::PointLikeSrcFlux{T},
     ant_traj::Trajectory;
-    pre_load_rot_mat::Union{<:AbstractArray{Matrix{T}},Nothing} = nothing) where T
+    pre_load_rot_mat::Union{AbstractArray{<:AbstractMatrix},Nothing} = nothing) where T
 
     if isnothing(pre_load_rot_mat)
         pre_load_rot_mat = unique_rot_mats(ant_traj)#TODO: maybe reduce the nb of rot_mat
