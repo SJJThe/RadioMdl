@@ -110,14 +110,16 @@ It is also possible to offset the trajectory using
     Trajectory(traj::AbstractDataFrame;
                time_tag::Symbol = :times,
                azimuth_tag::Symbol = :azimuths,
-               elevation_tag::Symbol = :elevations)
+               elevation_tag::Symbol = :elevations,
+               range_tag::Union{Symbol,Nothing} = nothing,
+               date_format::String = "yyyy-mm-dd\\THH:MM:SS.sss")
 
 Yields a 'Trajectory' structure. The columns of the DataFrame 'traj'  contain
-the columns of symbols defined by 'time_tag', 'azimuth_tag' and 'elevation_tag'.
-It is possible to have rows of same time and different azimuths and/or
-elevations (e.g. for sky mapping). Angles are in degrees. It is assumed the
-dataframe defines angles as azimuths and elevations. The method converts them in
-co-azimuth and polar angles, as defined in ['SphereCoord'](@ref).
+the columns of symbols defined by 'time_tag', 'azimuth_tag', 'elevation_tag' and
+'range_tag'. It is possible to have rows of same time and different azimuths
+and/or elevations (e.g. for sky mapping). Angles are in degrees. It is assumed
+the dataframe defines angles as azimuths and elevations. The method converts
+them in co-azimuth and polar angles, as defined in ['SphereCoord'](@ref).
 
 ---
     Trajectory(file_path::String;
@@ -283,19 +285,6 @@ function get_unique_coords(Tr::Trajectory{T}) where T
     end
 
     return unique_coords, time_ids, traj_ids
-
-    # # get unique coordinates and their indices in trajectory
-    # unique_coords = unique(Tr.traj)
-    # unique_coords_id = [findall(x -> x == c, Tr.traj) for c in unique_coords]
-    # if eltype(unique_coords_id[1]) == CartesianIndex{2}
-    #     time_ids = [[a_c[1] for a_c in u_id] for u_id in unique_coords_id]
-    #     traj_ids = [[a_c[2] for a_c in u_id] for u_id in unique_coords_id]
-    # else
-    #     time_ids = [[a_c for a_c in u_id] for u_id in unique_coords_id]
-    #     traj_ids = [[1 for a_c in u_id] for u_id in unique_coords_id]
-    # end
-
-    # return unique_coords, time_ids, traj_ids
 end
 
 
@@ -625,12 +614,18 @@ end
 
 
 """
-#FIXME: update doc
     get_antenna_temperature(A::Antenna{T}, 
-                            T_b::SphereMap{T}) where T
+                            T_b::SphereMap{T},
+                            point_coord::SphereCoord;
+                            pre_load_rot_mat::Union{AbstractMatrix,Nothing} = nothing) where T
 
-Return the antenna temperature for a 'SphereMap' temperature 'T_b' (extended
-sources). See ['SphereMap'](@ref).
+Returns the antenna temperature for a `SphereMap` temperature `T_b` (extended
+sources) when pointing in the direction `point_coord`. See ['SphereMap'](@ref).
+
+A pre-computed rotation matrix can be passed to `pre_load_rot_mat` to avoid
+computing it for each call. The rotation matrix must be of size 3x3 and
+correspond to the rotation from the antenna frame to the source frame. It can be
+computed using ['rot_mat'](@ref).
 
 ---
     get_antenna_temperature(A::Antenna{T},
@@ -638,6 +633,30 @@ sources). See ['SphereMap'](@ref).
 
 Returns the antenna temperature for a scalar temperature 'T_b' (point-like
 sources in boresight).
+
+---
+    get_antenna_temperature(A::Antenna{T},
+                            T_b::SphereMap{T},
+                            ant_traj::Trajectory;
+                            pre_load_rot_mat::Union{AbstractMatrix,Nothing} = nothing) where T
+
+Returns the antenna temperature for a `SphereMap` temperature `T_b` (extended
+sources) when the antenna is moving over the sky.
+
+---
+    get_antenna_temperature(A::Antenna{T},
+                            T_b::DimArray{SphereMap{T}},
+                            ant_traj::Trajectory;
+                            pre_load_rot_mat::Union{AbstractArray{<:AbstractMatrix},Nothing} = nothing) where T
+
+Returns the antenna temperature `DimArray` of `SphereMap`s (moving extended
+sources) when the antenna is moving over the sky.
+
+The antenna trajectory must begin after or at the same time as the first SphereMap
+in T_b, as a model needs to be defined for each antenna position. However, `T_b`
+`:times` dimension can be shorter than the antenna trajectory time samples, in
+which case the last sampled SphereMap in `T_b` before the antenna time samples
+is used.
 
 """
 function get_antenna_temperature(A::Antenna{T}, 
@@ -655,9 +674,7 @@ function get_antenna_temperature(A::Antenna{T},
     # apply SphereMap to Antenna
     g_T_b = A(T_b, point_coord; pre_load_rot_mat=pre_load_rot_mat)
 
-    # return trapz((deg2rad.(alpha_grid), deg2rad.(beta_grid)), 
-    #              g_T_b.spheremap .* #=sin_beta_weights=#sind.(beta_grid)') / (4*pi)
-    return sum(g_T_b.spheremap .* #=sin_beta_weights=#sind.(beta_grid)' .* weights) / (4*pi)
+    return sum(g_T_b.spheremap .* sind.(beta_grid)' .* weights) / (4*pi)
 end
 
 function get_antenna_temperature(A::Antenna{T}, 
@@ -687,7 +704,7 @@ function get_antenna_temperature(A::Antenna{T},
     weights = integration_weights(alpha_grid, beta_grid)
 
     # scale gain by integral factor
-    scaled_gain = (A.gain_pat.spheremap .* #=sin_beta_weights=#sind.(beta_grid)') ./ (4π) .* weights
+    scaled_gain = (A.gain_pat.spheremap .* sind.(beta_grid)') ./ (4π) .* weights
     
     # nb of coords per time stamps
     nb_coords = size(ant_traj.traj,2)
@@ -723,19 +740,6 @@ function get_antenna_temperature(A::Antenna{T},
     return T_As
 end
 
-
-
-"""
-    get_antenna_temperature(A::Antenna{T},
-        T_b::DimArray{SphereMap{T}},
-        ant_traj::Trajectory;
-        pre_load_rot_mat::Union{AbstractArray{<:AbstractMatrix},Nothing} = nothing) where T
-
-Get the antenna temperature in the antenna frame for a DimArray of SphereMaps.
-The antenna trajectory must begin after or at the same time as the first SphereMap
-in T_b, as a model needs to be defined for each antenna position.
-
-"""
 function get_antenna_temperature(A::Antenna{T},
     T_b::DimArray{SphereMap{T}},
     ant_traj::Trajectory;
@@ -751,7 +755,7 @@ function get_antenna_temperature(A::Antenna{T},
     weights = integration_weights(alpha_grid, beta_grid)
 
     # scale gain by integral factor
-    scaled_gain = (A.gain_pat.spheremap .* #=sin_beta_weights=#sind.(beta_grid)') ./ (4π) .* weights
+    scaled_gain = (A.gain_pat.spheremap .* sind.(beta_grid)') ./ (4π) .* weights
     
     # nb of coords per time stamps
     nb_coords = size(ant_traj.traj,2)
@@ -792,15 +796,6 @@ function get_antenna_temperature(A::Antenna{T},
             ant_times = t_c[T_b_time_ids .== t_id]
             ant_tr = tr_c[T_b_time_ids .== t_id]
 
-            # select SphereMap from latest time before current antenna time
-            T_b_t = T_b[times=t_id,freqs=1]
-
-            # convert the map coordinates (same for all frequencies) of spheremap
-            # to antenna frame using precomputed rot_mat for ant_coord
-            # new_map_coords = pass_frame_to_frame(T_b_t, ant_coord, alpha_grid, 
-            #                                      beta_grid; grid_only=true,
-            #                            pre_load_rot_mat=pre_load_rot_mat[t_c[1],tr_c[1]])
-            
             @threads for f in axes(T_b, :freqs)    
                 # select SphereMap from latest time before current antenna time
                 T_b_t_f = T_b[times=t_id,freqs=f]
@@ -810,23 +805,8 @@ function get_antenna_temperature(A::Antenna{T},
                 T_b_in_ant = pass_frame_to_frame(T_b_t_f, ant_coord, alpha_grid, 
                                                  beta_grid;
                                        pre_load_rot_mat=pre_load_rot_mat[t_c[1],tr_c[1]])
-                # compute spheremap with new rotated map coordinates
-                # T_b_in_ant = Matrix{T}(undef, size(new_map_coords))
-                # @inbounds for j in axes(new_map_coords,2)
-                #     @simd for i in axes(new_map_coords,1)
-                #         T_b_in_ant[i,j] = T_b_t_f(new_map_coords[i,j][1],
-                #                                                   new_map_coords[i,j][2])
-                #     end
-                # end
-                # T_b_in_ant = T_b[times=t_id,freqs=f](new_map_coords...)#FIXME: this is costly
-
-                # combine antenna gain
-                # wks[threadid()] = scaled_gain .* T_b_in_ant.spheremap
-    
+               
                 # integrate over sphere
-                # T_As[times=t_c,traj_idx=tr_c] .= trapz((deg2rad.(alpha_grid), 
-                #                                         deg2rad.(beta_grid)), 
-                #                                         wks[threadid()])
                 v = dot(scaled_gain, T_b_in_ant)
                 @inbounds for k in eachindex(ant_times)
                     T_As[times=ant_times[k],freqs=f,traj_idx=ant_tr[k]] = v
@@ -861,7 +841,8 @@ thus normalizing the receiver frequency response energy.
 
 It is possible to use the 'get_nb_freq_chan' function to get the number of
 frequency channels. 'freq_range' can be used with a 'Receiver' as argument to
-get the frequency range vector of the receiver.
+get the frequency range vector of the receiver (pre-computed at the creation of
+the structure).
 
 ---
     Receiver(freq_res::T,
@@ -883,8 +864,6 @@ Yields a 'Receiver' structure taking a vector as argument for 'freq_resp'.
 Yields a 'Receiver' structure with a flat frequency response.
 
 """#TODO: rename in Transceiver
-#TODO: store directly the freq range to avoid computing it all the time (eg in
-#classic_gain_link_budget)
 struct Receiver{T<:AbstractFloat}
     freq_res::T # frequency resolution
     cent_freq::T # center frequency
@@ -892,6 +871,7 @@ struct Receiver{T<:AbstractFloat}
     gain_amps::T # gain of amplifiers
     T_rx::Union{T,DimArray{T}} # receiver temperature
     freq_resp::DimArray{T} # frequency response
+    freq_range::Vector{T} # frequency range
 
     function Receiver(freq_res::T, 
         cent_freq::T,
@@ -917,7 +897,9 @@ struct Receiver{T<:AbstractFloat}
         #         length(freq_resp)) .- 1 .<= 1e-10) "the receiver frequency response \
         #         must be normalized"
         
-        return new{T}(freq_res, cent_freq, bw, gain_amps, T_rx, freq_resp)
+        freq_range = freq_range(freq_res, cent_freq, bw)
+
+        return new{T}(freq_res, cent_freq, bw, gain_amps, T_rx, freq_resp, freq_range)
     end
 end
 
@@ -963,7 +945,7 @@ end
 
 get_nb_freq_chan(R::Receiver) = Int(div(R.bw, R.freq_res))
 
-freq_range(R::Receiver) = freq_range(R.freq_res, R.cent_freq, R.bw)
+freq_range(R::Receiver) = R.freq_range
 
 function get_psd_gain_coeff(R::Receiver)
     return (R.gain_amps * k_boltz) .* R.freq_resp
@@ -989,7 +971,6 @@ constant, impedance and frequency respopnse).
 """
 struct Instrument{T<:AbstractFloat,U<:Union{T,AbstractVector{T}},A<:Antenna{T}}
     antenna::A # antenna
-    #TODO: Union Transmitter with new struct here?
     receiver::Receiver{T} # receiver of precision T
     coords::Dict{Symbol,U} # coordinates
 
@@ -1418,8 +1399,7 @@ end
 
 
 
-"""#TODO: add DimArray{SphereMapT} and assert with ptl_srcs_flux :freqs dim
-   #TODO: OR AbstractBkg instead of MovingExtendSrcTemp in arg def (keep assert)
+"""
     SkyMdl(bkg_srcs_temp::MovingExtendSrcTemp{T},
                  ptl_srcs_flux::Vector{PointLikeSrcFlux{T}}) where T
 
@@ -1440,7 +1420,7 @@ struct SkyMdl{T<:AbstractFloat} <: AbstractBkg
     bkg_srcs_temp::Union{T,SphereMap{T},AbstractBkg}#MovingExtendSrcTemp{T}}
     ptl_srcs_flux::Vector{PointLikeSrcFlux{T}} # point-like sources fluxes
     
-    function SkyMdl(bkg_srcs_temp::Union{T,SphereMap{T},AbstractBkg},#MovingExtendSrcTemp{T}},
+    function SkyMdl(bkg_srcs_temp::Union{T,SphereMap{T},AbstractBkg},
         ptl_srcs_flux::Vector{PointLikeSrcFlux{T}} = PointLikeSrcFlux{T}[]) where T
         
         if !isempty(ptl_srcs_flux)
@@ -1461,7 +1441,7 @@ struct SkyMdl{T<:AbstractFloat} <: AbstractBkg
     end
 end
 
-function SkyMdl(bkg_srcs_temp::Union{T,SphereMap{T},AbstractBkg},#MovingExtendSrcTemp{T}},
+function SkyMdl(bkg_srcs_temp::Union{T,SphereMap{T},AbstractBkg},
     ptl_srcs_flux::PointLikeSrcFlux{T}) where T
 
     return SkyMdl(bkg_srcs_temp, [ptl_srcs_flux])
@@ -1473,8 +1453,7 @@ function get_antenna_temperature(A::Antenna{T},
     kwds...) where T
     
     # get antenna temperature of background sources
-    # FIXME: why seperating MovingExtendSrcTemp and SphereMap?
-    if typeof(S.bkg_srcs_temp) <: AbstractBkg #MovingExtendSrcTemp
+    if typeof(S.bkg_srcs_temp) <: AbstractBkg
         T_bkg = get_antenna_temperature(A, S.bkg_srcs_temp, ant_traj; kwds...)
     elseif typeof(S.bkg_srcs_temp) <: SphereMap
         T_bkg = get_antenna_temperature(A, S.bkg_srcs_temp, ant_traj; kwds...)
@@ -1575,7 +1554,7 @@ function Satellite(s::String,
     sat_eirp_density = sat_eirp_density_func(sat_traj)
     
     # beamform the satellite antenna pattern
-    if rotate_beam#TODO: make this more complex
+    if rotate_beam
         ant = sats_instrument.antenna
         pat = ant.gain_pat
         map_rot = rotate_to(pat, 0., rand(pat.beta_grid))

@@ -2,7 +2,7 @@
 """
 """
 function model_observ_psd!(obs::Observation{T},
-    sky_mdl::Union{AbstractBkg,Nothing},
+    sky_mdl::Union{<:AbstractBkg,Nothing},
     constellation::AbstractVector{<:Constellation{T}}) where T
     
     ## Extract useful information from observation
@@ -52,12 +52,6 @@ function model_observ_psd!(obs::Observation{T},
         sats = co.sats
         # different constellation may have different load hence the :dynamic here
         @threads :dynamic for t in eachindex(time_samps)
-            # # get pointing positions of antenna
-            # t_samp = time_samps[t]
-            # ant_coords = ant_traj.traj[t,:]
-            # # list of sats visible at time t_samp
-            # sats_names_at_t = get_sats_names_at_time(co, t_samp; time_res=time_res)
-            # for s_name in sats_names_at_t
             @inbounds for e in entries_at(sat_idx, t)
                 # satellite
                 sat = sats[e.sat_idx]
@@ -68,17 +62,12 @@ function model_observ_psd!(obs::Observation{T},
                 # satellite EIRP_density at time t_samp
                 sat_EIRP_den = parent(get_sat_EIRP_density(sat, e.traj_idx)) ./ k_boltz
                 # loop over antenna positions
-                for c_ind in axes(ant_traj.traj, 2)#eachindex(ant_coords)
-                    ant_c = ant_traj.traj[t,c_ind]#ant_coords[c_ind]
+                for c_ind in axes(ant_traj.traj, 2)
+                    ant_c = ant_traj.traj[t,c_ind]
                     # link budget
                     l = lnk_bdgt(sat_coord, sat_instru, ant_c, instru; 
                                  pre_load_rot_mat=rot_mats[t,c_ind])
                     # update satellite contribution
-                    # obs.result[times=t,traj_idx=c_ind] .+= l .* sat_EIRP_den
-                    # sat_EIRP_den .*= l
-                    # for f in axes(res,2)
-                    #     res[t,f,c_ind] += l .* sat_EIRP_den[f]
-                    # end
                     res[t,:,c_ind] .+= l .* sat_EIRP_den
                 end
             end
@@ -92,14 +81,14 @@ function model_observ_psd!(obs::Observation{T},
 end
 
 function model_observ_psd!(obs::Observation{T},
-    sky_mdl::Union{AbstractBkg,Nothing},
+    sky_mdl::Union{<:AbstractBkg,Nothing},
     constellation::Constellation{T}) where T
 
     return model_observ_psd!(obs, sky_mdl, [constellation])
 end
 
 function model_observ_psd!(obs::Observation{T},
-    sky_mdl::Union{AbstractBkg,Nothing} = nothing) where T
+    sky_mdl::Union{<:AbstractBkg,Nothing} = nothing) where T
 
-    return model_observ_psd!(obs, sky_mdl, Constellation[])
+    return model_observ_psd!(obs, sky_mdl, Constellation{T}[])
 end

@@ -80,8 +80,7 @@ function classic_gain_link_budget(sat_coord::SphereCoord{T},
                                    As<:Antenna{T},U<:Union{T,AbstractVector{T}},
                                    A<:Antenna{T}}
 
-    # frequency bins of receiver#TODO: should be computed when creating the
-    # receiver to avoid computing it here all the time
+    # frequency bins of receiver
     freq_bins = freq_range(sat_instru.receiver)
 
     # coordinate of sat in telescope frame
@@ -159,13 +158,12 @@ function epfd_link_budget(sat_coord::SphereCoord{T},
     sat_instru::Instrument{T,Us,As},
     tel_pointing_coord::SphereCoord{T},
     tel_instru::Instrument{T,U,A};
-    tel_max_gain::T = get_boresight_gain(tel_instru.antenna),
     pre_load_rot_mat::Union{AbstractMatrix,Nothing} = nothing) where {T<:AbstractFloat,
                                                         Us<:Union{T,AbstractVector{T}},
                                                                       As<:Antenna{T},
                                                         U<:Union{T,AbstractVector{T}},
-                                                                      A<:Antenna{T}}
-    
+                                                        A<:Antenna{T}}
+
     # coordinate of sat in telescope frame
     sat_coord_in_tel = pass_frame_to_frame(sat_coord, tel_pointing_coord;
                                            pre_load_rot_mat=pre_load_rot_mat)
@@ -174,7 +172,8 @@ function epfd_link_budget(sat_coord::SphereCoord{T},
     tel_antenna = tel_instru.antenna
 
     # telescope gain
-    gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel) / tel_max_gain
+    gain_tel = get_gain_value(tel_antenna, sat_coord_in_tel) / 
+               get_boresight_gain(tel_instru.antenna)
     
     return gain_tel / (4π * sat_coord.r^2)
 end
