@@ -87,6 +87,7 @@ using InterpolationKernels
 using LinearInterpolators
 using SpecialFunctions
 using Statistics
+using StaticArrays
 # using Trapz
 using Base.Threads
 
