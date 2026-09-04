@@ -871,7 +871,7 @@ struct Receiver{T<:AbstractFloat}
     gain_amps::T # gain of amplifiers
     T_rx::Union{T,DimArray{T}} # receiver temperature
     freq_resp::DimArray{T} # frequency response
-    freq_range::Vector{T} # frequency range
+    freq_rng::Vector{T} # frequency range
 
     function Receiver(freq_res::T, 
         cent_freq::T,
@@ -897,9 +897,9 @@ struct Receiver{T<:AbstractFloat}
         #         length(freq_resp)) .- 1 .<= 1e-10) "the receiver frequency response \
         #         must be normalized"
         
-        freq_range = freq_range(freq_res, cent_freq, bw)
+        freq_rng = freq_range(freq_res, cent_freq, bw)
 
-        return new{T}(freq_res, cent_freq, bw, gain_amps, T_rx, freq_resp, freq_range)
+        return new{T}(freq_res, cent_freq, bw, gain_amps, T_rx, freq_resp, freq_rng)
     end
 end
 
@@ -945,7 +945,7 @@ end
 
 get_nb_freq_chan(R::Receiver) = Int(div(R.bw, R.freq_res))
 
-freq_range(R::Receiver) = R.freq_range
+freq_range(R::Receiver) = R.freq_rng
 
 function get_psd_gain_coeff(R::Receiver)
     return (R.gain_amps * k_boltz) .* R.freq_resp
